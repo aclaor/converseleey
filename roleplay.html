@@ -286,7 +286,7 @@ const PROVIDERS = {
     keyHint: "gsk_...",
     shape: "openai",
     base: "https://api.groq.com/openai/v1",
-    prefer: [/llama-3\.3.*70b/i, /llama.*70b/i, /llama-3\.1/i, /llama/i, /mixtral/i]
+    prefer: [/llama-3\.3-70b/i, /llama-3\.1-8b-instant/i, /llama3-70b/i, /gpt-oss/i, /qwen.*instruct/i, /kimi/i, /gemma2?-.*it/i, /mixtral/i, /llama/i]
   },
   openrouter: {
     name: "OpenRouter",
@@ -297,7 +297,7 @@ const PROVIDERS = {
     shape: "openai",
     base: "https://openrouter.ai/api/v1",
     freeOnly: true,
-    prefer: [/llama.*70b.*:free/i, /:free/i]
+    prefer: [/llama-3\.3-70b.*instruct/i, /llama.*70b.*instruct/i, /instruct/i, /chat/i, /:free/i]
   },
   gemini: {
     name: "Google Gemini",
@@ -307,7 +307,7 @@ const PROVIDERS = {
     keyHint: "AIza...",
     shape: "gemini",
     base: "https://generativelanguage.googleapis.com/v1beta",
-    prefer: [/gemini.*flash/i, /gemini/i]
+    prefer: [/gemini-[0-9.]+-flash$/i, /gemini.*flash/i, /gemini.*pro/i, /gemini/i]
   },
   anthropic: {
     name: "Anthropic",
@@ -345,12 +345,16 @@ function explain(e, p){
   return {kind:"other", text:`<b>That didn't work.</b> ${msg}`};
 }
 
+/* Models that exist in these catalogues but cannot hold a conversation:
+   safety classifiers, speech-to-text, embeddings, rerankers, image models. */
+const NOT_CHAT = /guard|moderat|classif|safety|whisper|tts|text-to-speech|speech|transcri|embed|rerank|distil|prompt-?guard|sdxl|flux|dall|imagen|veo|stable-?diff|\basr\b/i;
+
 async function listModels(pid, k){
   const p = PROVIDERS[pid];
-  let url, opts = {headers: headersFor(p,k)};
-  if(p.shape === "gemini") url = `${p.base}/models?key=${encodeURIComponent(k)}&pageSize=200`;
-  else url = `${p.base}/models`;
-  const r = await fetch(url, opts);
+  const url = p.shape === "gemini"
+    ? `${p.base}/models?key=${encodeURIComponent(k)}&pageSize=200`
+    : `${p.base}/models`;
+  const r = await fetch(url, {headers: headersFor(p,k)});
   if(!r.ok){
     let m = `HTTP ${r.status}`;
     try{ const j = await r.json(); m = (j.error && (j.error.message||j.error)) || j.message || m; }catch(e){}
@@ -362,13 +366,58 @@ async function listModels(pid, k){
     ids = (j.models||[]).filter(m => (m.supportedGenerationMethods||[]).includes("generateContent"))
                         .map(m => m.name.replace(/^models\//,""));
   else ids = (j.data||[]).map(m => m.id);
-  if(p.freeOnly){
-    const f = ids.filter(id => /:free$/i.test(id));
-    if(f.length) ids = f;
+
+  ids = ids.filter(id => !NOT_CHAT.test(id));
+  if(p.freeOnly){ const f = ids.filter(id => /:free$/i.test(id)); if(f.length) ids = f; }
+  if(!ids.length) throw new Error("This key can't see any conversational models.");
+
+  /* rank: earlier preference patterns first, everything else after */
+  const rank = id => { for(let i=0;i<p.prefer.length;i++) if(p.prefer[i].test(id)) return i; return 99; };
+  return ids.slice().sort((a,b) => rank(a)-rank(b) || a.length-b.length);
+}
+
+/* A model can look conversational and still refuse to stream a chat.
+   Send one tiny real request and find out before the person starts a scene. */
+async function probe(pid, k, m){
+  const p = PROVIDERS[pid];
+  let url, body;
+  if(p.shape === "anthropic"){
+    url = `${p.base}/messages`;
+    body = {model:m, max_tokens:8, messages:[{role:"user", content:"Say ok."}], stream:true};
+  } else if(p.shape === "gemini"){
+    url = `${p.base}/models/${m}:streamGenerateContent?alt=sse&key=${encodeURIComponent(k)}`;
+    body = {contents:[{role:"user", parts:[{text:"Say ok."}]}], generationConfig:{maxOutputTokens:8}};
+  } else {
+    url = `${p.base}/chat/completions`;
+    body = {model:m, stream:true, max_tokens:8, messages:[{role:"user", content:"Say ok."}]};
   }
-  if(!ids.length) throw new Error("This key can't see any usable models.");
-  for(const rx of p.prefer){ const hit = ids.find(id => rx.test(id)); if(hit) return hit; }
-  return ids[0];
+  const r = await fetch(url, {method:"POST", headers: headersFor(p,k), body: JSON.stringify(body)});
+  if(!r.ok){
+    let msg = `HTTP ${r.status}`;
+    try{ const j = await r.json(); msg = (j.error && (j.error.message||j.error)) || j.message || msg; }catch(e){}
+    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+  }
+  try{ r.body.cancel(); }catch(e){}
+  return true;
+}
+
+/* Walk the ranked list until one actually answers. */
+async function connect(pid, k, onTry){
+  const cands = await listModels(pid, k);
+  const tried = [];
+  for(const m of cands.slice(0, 6)){
+    if(onTry) onTry(m);
+    try{ await probe(pid, k, m); return {model:m, tried}; }
+    catch(e){
+      const msg = String(e && e.message || e);
+      tried.push(`${m} — ${msg.slice(0,90)}`);
+      /* auth, rate and network problems are not the model's fault: stop here */
+      if(e instanceof TypeError || /\b401\b|\b403\b|invalid.*key|unauthor|\b429\b|rate.?limit|quota|credit|balance/i.test(msg)) throw e;
+    }
+  }
+  const err = new Error("None of the models this key can see would accept a chat request.");
+  err.tried = tried;
+  throw err;
 }
 
 /* One streaming call, whichever provider. onText gets the full text so far. */
@@ -508,13 +557,19 @@ $("#savekey").addEventListener("click", async () => {
   if(!k){ $("#keymsg").innerHTML = '<div class="err">Paste a key first.</div>'; return; }
   $("#savekey").classList.add("off"); $("#savekey").textContent = "Testing…";
   try{
-    model = await listModels(provider, k);
-    apiKey = k; saveCreds(provider, k);
-    $("#keymsg").innerHTML = `<div class="ok">Connected to <b>${p.name}</b>. Using <b>${model}</b>.</div>`;
-    setTimeout(() => { renderPicker(); show("s-pick"); }, 750);
+    const res = await connect(provider, k, m => {
+      $("#keymsg").innerHTML = `<div class="ok">Trying <b>${m}</b>…</div>`;
+    });
+    model = res.model; apiKey = k; capMax = null; saveCreds(provider, k);
+    const skipped = res.tried.length
+      ? `<br><span style="opacity:.75">Skipped ${res.tried.length} model${res.tried.length===1?"":"s"} that wouldn't hold a conversation.</span>` : "";
+    $("#keymsg").innerHTML = `<div class="ok">Connected to <b>${p.name}</b>. Using <b>${model}</b>.${skipped}</div>`;
+    setTimeout(() => { renderPicker(); show("s-pick"); }, 850);
   }catch(e){
     const x = explain(e, p);
-    $("#keymsg").innerHTML = `<div class="err">${x.text}</div>`;
+    const extra = e.tried && e.tried.length
+      ? `<br><br><b>What was tried:</b><br>${e.tried.map(t=>`<span style="opacity:.8">${t}</span>`).join("<br>")}` : "";
+    $("#keymsg").innerHTML = `<div class="err">${x.text}${extra}</div>`;
   }
   $("#savekey").classList.remove("off"); $("#savekey").textContent = "Connect";
 });
@@ -750,7 +805,8 @@ renderProviders();
   provider = saved.p; apiKey = saved.k;
   renderProviders();
   try{
-    model = await listModels(provider, apiKey);
+    const res = await connect(provider, apiKey);
+    model = res.model;
     renderPicker(); show("s-pick");
   }catch(e){
     const x = explain(e, PROVIDERS[provider]);
