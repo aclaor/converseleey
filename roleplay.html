@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Roleplay — The Practice Room</title>
+<meta name="description" content="Rehearse the conversation before it happens. An AI character stays in role, pushes back, and coaches you afterwards on what you actually said.">
+<meta name="theme-color" content="#0C6E75">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127908;</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/base.css">
+<style>
+.wrap{max-width:700px;margin:0 auto;padding:0 20px 90px}
+@media(max-width:560px){.wrap{padding:0 16px 66px}}
+.stage{display:none;animation:rise .34s cubic-bezier(.2,.7,.3,1) both}
+.stage.live{display:block}
+@keyframes rise{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+.head{padding:clamp(34px,6vw,58px) 0 0}
+.head .mono{color:var(--accent);display:block;margin-bottom:14px}
+.head h1{font-family:var(--serif);font-size:clamp(2.05rem,6vw,3rem);line-height:1.03;max-width:17ch}
+.head p{color:var(--ink-2);margin-top:18px;font-size:1.04rem;max-width:56ch}
+.head p + p{margin-top:12px}
+
+/* key setup */
+.keybox{margin-top:24px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+.keybox label{font-weight:600;font-size:.95rem;display:block;margin-bottom:9px}
+.keybox input{width:100%;font-family:var(--mono);font-size:.88rem;padding:12px 14px;border-radius:10px;
+  border:1px solid var(--line);background:var(--inset);color:var(--ink)}
+.keybox input:focus{outline:none;box-shadow:0 0 0 2px var(--accent);border-color:transparent}
+.keyrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center}
+.keynote{font-size:.87rem;color:var(--ink-3);margin-top:14px;line-height:1.6}
+.keynote b{color:var(--ink-2);font-weight:600}
+.warn{margin-top:16px;background:var(--warn-bg);border-radius:11px;padding:14px 16px;font-size:.89rem;color:var(--ink-2);line-height:1.6}
+.warn b{color:var(--warn);font-weight:600;display:block;margin-bottom:5px}
+.err{background:var(--bad-bg);color:var(--bad);border-radius:11px;padding:13px 16px;font-size:.9rem;margin-top:14px;word-break:break-word}
+.ok{background:var(--good-bg);color:var(--good);border-radius:11px;padding:13px 16px;font-size:.9rem;margin-top:14px}
+
+/* scenario picker */
+.grp{margin-top:28px}
+.grp > .mono{color:var(--ink-3);display:block;margin-bottom:10px}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+@media(max-width:620px){.cards{grid-template-columns:1fr}}
+.sc{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 17px;text-align:left;
+  transition:border-color .15s,transform .13s}
+.sc:hover{border-color:var(--accent);transform:translateY(-2px)}
+.sc b{display:block;font-weight:600;font-size:.98rem}
+.sc small{display:block;color:var(--ink-3);font-size:.85rem;margin-top:4px;line-height:1.45}
+.sc .who{display:block;font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--accent);margin-top:9px}
+
+/* scene */
+.scnhead{padding:clamp(22px,4vw,34px) 0 0}
+.scnhead .mono{color:var(--accent);display:block;margin-bottom:9px}
+.scnhead h2{font-family:var(--serif);font-size:clamp(1.5rem,4.4vw,2rem);line-height:1.12}
+.brief{margin-top:14px;background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:17px 19px}
+.brief p{font-size:.97rem;color:var(--ink-2)}
+.brief .goal{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:.92rem}
+.brief .goal b{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:5px}
+
+.thread{display:flex;flex-direction:column;gap:11px;margin-top:18px;min-height:50px}
+.msg{max-width:84%;padding:13px 16px;border-radius:15px;font-size:1rem;line-height:1.58;white-space:pre-wrap;word-wrap:break-word}
+.msg.them{background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:4px;align-self:flex-start}
+.msg.you{background:var(--accent-soft);border-bottom-right-radius:4px;align-self:flex-end}
+.msg .who{display:block;font-family:var(--mono);font-size:.58rem;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:5px}
+.msg.you .who{color:var(--accent)}
+.dots span{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ink-3);margin-right:4px;animation:bl 1.2s infinite}
+.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
+@keyframes bl{0%,60%,100%{opacity:.25}30%{opacity:1}}
+
+.composer{margin-top:16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.composer textarea{width:100%;border:none;background:transparent;color:var(--ink);font-family:var(--sans);
+  font-size:1rem;line-height:1.6;padding:15px 17px;resize:vertical;min-height:82px;display:block}
+.composer textarea:focus{outline:none}
+.crow{padding:11px 15px;border-top:1px solid var(--line);display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.mic{width:40px;height:40px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;flex:none;transition:transform .12s}
+.mic:hover{transform:scale(1.07)}
+.mic svg{width:18px;height:18px;fill:var(--ink-2)}
+.mic.live{background:var(--bad)}.mic.live svg{fill:#fff}
+.hint{font-size:.83rem;color:var(--ink-3);flex:1;min-width:110px}
+.usage{font-family:var(--mono);font-size:.63rem;font-weight:600;color:var(--ink-3);letter-spacing:.05em;
+  white-space:nowrap;font-variant-numeric:tabular-nums}
+
+/* coaching */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(126px,1fr));gap:10px;margin-top:20px}
+.coach{margin-top:16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+.coach > .mono{color:var(--accent);display:block;margin-bottom:11px}
+.coach .body{white-space:pre-wrap;font-size:1rem;line-height:1.7}
+.coach .body:empty::after{content:"…";color:var(--ink-3)}
+.acts{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
+.disc{font-size:.85rem;color:var(--ink-3);margin-top:28px;padding-top:18px;border-top:1px solid var(--line)}
+.tiny{font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+</style>
+</head>
+<body>
+
+<header class="bar"><div class="bar-in">
+  <a class="mark" href="./">The <em>Practice</em> Room</a>
+  <div class="bar-sp"></div>
+  <nav class="bar-nav">
+    <a href="roleplay.html" aria-current="page">Roleplay</a>
+    <a href="report.html">Speech report</a>
+    <a href="check.html">Assessment</a>
+    <a href="train.html">28 days</a>
+    <a href="blog.html">Reading</a>
+  </nav>
+</div></header>
+
+<main class="wrap">
+
+<!-- 1 · KEY -->
+<section class="stage live" id="s-key">
+  <div class="head">
+    <span class="mono">Roleplay · unlimited · your key</span>
+    <h1>Have the conversation before you have to.</h1>
+    <p>An AI character plays the other person — the interviewer, the manager, the date — and stays in role. It won't coach you mid-scene, because nobody does that in real life. When you end it, it breaks character and tells you what you actually did.</p>
+    <p>This runs directly from your browser to Anthropic using <b>your own API key</b>. That means it's genuinely unlimited: no daily cap, no trial, no upgrade prompt. It also means the cost is yours, and it's small — a full scene plus coaching is typically well under a cent.</p>
+
+    <div class="keybox">
+      <label for="key">Your Anthropic API key</label>
+      <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+      <div class="keyrow">
+        <button class="btn" id="savekey">Save and continue</button>
+        <a class="btn ghost" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key</a>
+      </div>
+      <div id="keymsg"></div>
+      <p class="keynote"><b>The key is stored only in this browser</b>, in local storage on this device. It is never sent anywhere except directly to Anthropic's API. There is no server behind this page — nobody, including whoever made this site, can see it.</p>
+    </div>
+
+    <div class="warn">
+      <b>Sensible precautions</b>
+      Create a <strong>separate key just for this</strong> rather than reusing one from another project, and set a spend limit on it in the Anthropic console. Don't paste a key into any page on a shared or public computer. You can delete the key from this browser at any time with the button that appears once it's saved.
+    </div>
+  </div>
+</section>
+
+<!-- 2 · PICK -->
+<section class="stage" id="s-pick">
+  <div class="head">
+    <span class="mono">Pick a scene</span>
+    <h1>Who are you practising with?</h1>
+    <p>Each one puts you in a specific moment with a specific person. They react to how you actually handle it — ramble and they get impatient, be vague and they push.</p>
+    <div id="scnGroups"></div>
+    <div class="acts">
+      <button class="btn ghost" id="forget">Remove my key from this browser</button>
+      <span class="usage" id="usePick"></span>
+    </div>
+  </div>
+</section>
+
+<!-- 3 · SCENE -->
+<section class="stage" id="s-scene">
+  <div class="scnhead">
+    <span class="mono" id="scLabel"></span>
+    <h2 id="scTitle"></h2>
+    <div class="brief">
+      <p id="scSit"></p>
+      <div class="goal"><b>What you're trying to do</b><span id="scGoal"></span></div>
+    </div>
+  </div>
+  <div class="thread" id="thread"></div>
+  <div class="composer">
+    <label class="sr" for="ta">Your line</label>
+    <textarea id="ta" placeholder="Speak with the mic, or type your line. Cmd/Ctrl+Enter sends."></textarea>
+    <div class="crow">
+      <button class="mic" id="mic" aria-label="Speak"><svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.93V21h2v-3.07A7 7 0 0 0 19 11h-2Z"/></svg></button>
+      <button class="btn" id="send">Say it</button>
+      <button class="btn ghost" id="end">End scene &rarr; coaching</button>
+      <span class="hint" id="hint"></span>
+      <span class="usage" id="useScene"></span>
+    </div>
+  </div>
+  <div id="scErr"></div>
+</section>
+
+<!-- 4 · COACH -->
+<section class="stage" id="s-coach"></section>
+
+</main>
+
+<footer class="foot"><div class="foot-in">
+  <div class="links"><a href="./">Home</a><a href="roleplay.html">Roleplay</a><a href="report.html">Speech report</a><a href="check.html">Assessment</a><a href="train.html">28 days</a><a href="blog.html">Reading</a></div>
+  <div class="bar-sp"></div>
+  <p>Your key and your conversations stay in this browser. There is no server behind this page.</p>
+</div></footer>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const KEYSTORE = "practiceroom.anthropickey";
+const API = "https://api.anthropic.com/v1";
+let apiKey = null, model = null;
+let scene = null, history = [], ended = false;
+let tokIn = 0, tokOut = 0;
+
+const stages = ["s-key","s-pick","s-scene","s-coach"];
+const show = id => { stages.forEach(s => $("#"+s).classList.toggle("live", s===id)); window.scrollTo({top:0}); };
+
+/* ======================= SCENES ======================= */
+const SCENES = [
+{g:"Work", t:"The performance review", who:"Your manager, Dana",
+ sit:"Dana has your review in front of her. She thinks you had a good year but she has one criticism she's been sitting on, and she's going to raise it about a minute in.",
+ goal:"Take the criticism without defending, and get something concrete out of the conversation.",
+ role:"You are Dana, a fair but direct manager running a performance review. Open warmly and positively. About two exchanges in, raise a specific criticism: they consistently deliver work at the last minute, which means nobody can review it properly. If they get defensive, don't back down but stay calm. If they acknowledge it well, move on to what they want next year."},
+
+{g:"Work", t:"Asking for a raise", who:"Your manager, Ray",
+ sit:"You've asked for fifteen minutes. Ray knows roughly what it's about and is not hostile, but the budget is genuinely tight this quarter.",
+ goal:"State a number early, give your reasoning once, and stop talking.",
+ role:"You are Ray, a manager who likes this person and has a real budget constraint. Be warm but non-committal at first. Push them to justify the number with specifics. If they name a figure and back it with concrete work, get seriously interested and talk about what's possible. If they're vague or apologetic about asking, gently stall — that's what would really happen."},
+
+{g:"Work", t:"The idea nobody asked for", who:"A skeptical director, Priya",
+ sit:"You've grabbed five minutes with Priya to pitch something you think matters. She's busy and has heard a lot of pitches.",
+ goal:"Open on the problem, not the solution. One number. A clear ask at the end.",
+ role:"You are Priya, a director who is smart, time-poor and mildly skeptical. Ask sharp questions: who has this problem, how do you know, what would it cost. Don't be rude, but don't be easy. If they open with the solution rather than the problem, ask 'what problem is this solving?' If they make the case well, ask what they need from you."},
+
+{g:"Interviews", t:"The job interview", who:"An interviewer, Sam",
+ sit:"Twenty minutes in. Sam has your CV and is about to ask the question you were hoping to avoid.",
+ goal:"Answer honestly, structure it, and don't ramble when you're uncomfortable.",
+ role:"You are Sam, an experienced interviewer — friendly, professional, quietly evaluating. Start with 'tell me about yourself.' Then ask a harder follow-up based on what they actually said. Then ask about a weakness or a failure. Probe vague answers with 'can you give me a specific example?' Never coach them."},
+
+{g:"Interviews", t:"The question you can't answer", who:"A technical interviewer, Alex",
+ sit:"Alex has asked you something you genuinely don't know. There's a silence, and it's yours to fill.",
+ goal:"Admit it in the first sentence, then show how you'd find out.",
+ role:"You are Alex, a technical interviewer. Ask the candidate a question slightly outside their stated expertise. If they bluff, follow up with a more specific question that exposes it — calmly, not cruelly. If they admit they don't know and reason out loud about how they'd approach it, respond very positively, because that's what you're actually testing."},
+
+{g:"Social", t:"The stranger at the table", who:"Someone at a party, Jules",
+ sit:"You've just sat down at a table where you know nobody. Jules is next to you and has turned to say hello.",
+ goal:"Give them something to ask about, and ask about what they actually say.",
+ role:"You are Jules, friendly and a bit shy, at a party where you also don't know many people. Speak in short, natural sentences. If they give closed one-word answers, the conversation should visibly struggle — go slightly quiet, look for an exit. If they ask you a real follow-up question about something you said, warm up noticeably and open up more."},
+
+{g:"Social", t:"The first date", who:"Your date, Robin",
+ sit:"Forty minutes in. It's going fine. There's a lull, and one of you needs to do something with it.",
+ goal:"Show genuine interest in something specific, and tell one real story.",
+ role:"You are Robin, on a first date that is going okay but hasn't caught fire. Be warm and a little guarded. If they ask something specific about what you've said, open up and get more animated. If they only talk about themselves or ask generic questions, stay polite but flat. Never state how you're scoring them."},
+
+{g:"Hard", t:"Giving hard feedback", who:"A colleague, Chris",
+ sit:"Chris has been missing handovers and it's landing on you. You asked for a coffee to raise it. Chris does not know what's coming.",
+ goal:"Behaviour, effect, request. No character judgements, no sandwich.",
+ role:"You are Chris, a decent colleague who genuinely hasn't noticed this is a problem. Start relaxed and friendly. When the criticism lands, be a little surprised and slightly defensive at first — that's human. If they describe specific behaviour and its effect rather than calling you unreliable, come round and ask what would help. If they're vague or attack your character, get more defensive."},
+
+{g:"Hard", t:"The apology", who:"A friend, Noor",
+ sit:"You let Noor down in a way that actually mattered, and you've left it two weeks. You've asked to talk.",
+ goal:"What you did, the effect, what changes. No explanation of why it wasn't really your fault.",
+ role:"You are Noor, a good friend who was genuinely hurt and is still a bit raw. Be reserved at first, not hostile. If the apology includes excuses or 'I'm sorry you felt', stay cool and say what actually bothered you. If they name what they did and its effect without defending, soften properly and be warm again."},
+
+{g:"Hard", t:"Saying no", who:"A colleague, Morgan",
+ sit:"Morgan is asking you to take on something you genuinely don't have room for, and you have a habit of saying yes to this person.",
+ goal:"Say no clearly, once, without a spiral of apology.",
+ role:"You are Morgan, likeable and a bit relentless, who really needs this off your plate. Ask nicely. If they hedge or apologise a lot, read it as a maybe and push a little harder — reframe, offer to help, suggest it's small. If they say no clearly and hold it, accept it gracefully and respect them for it."}
+];
+
+/* ======================= KEY ======================= */
+function loadKey(){ try{ return localStorage.getItem(KEYSTORE); }catch(e){ return null; } }
+function saveKey(k){ try{ localStorage.setItem(KEYSTORE,k); }catch(e){} }
+function dropKey(){ try{ localStorage.removeItem(KEYSTORE); }catch(e){} }
+
+const HEADERS = k => ({
+  "x-api-key": k,
+  "anthropic-version": "2023-06-01",
+  "anthropic-dangerous-direct-browser-access": "true",
+  "content-type": "application/json"
+});
+
+async function pickModel(k){
+  const r = await fetch(`${API}/models?limit=100`, {headers: HEADERS(k)});
+  if(!r.ok){
+    let m = `${r.status}`;
+    try{ const j = await r.json(); m = (j.error && j.error.message) || m; }catch(e){}
+    throw new Error(m);
+  }
+  const ids = (await r.json()).data.map(m => m.id);
+  for(const want of [/sonnet/i, /opus/i, /haiku/i]){
+    const hit = ids.find(id => want.test(id));
+    if(hit) return hit;
+  }
+  if(!ids.length) throw new Error("This key has no models available to it.");
+  return ids[0];
+}
+
+$("#savekey").addEventListener("click", async () => {
+  const k = $("#key").value.trim();
+  $("#keymsg").innerHTML = "";
+  if(!k){ $("#keymsg").innerHTML = '<div class="err">Paste a key first.</div>'; return; }
+  $("#savekey").classList.add("off"); $("#savekey").textContent = "Checking…";
+  try{
+    model = await pickModel(k);
+    apiKey = k; saveKey(k);
+    $("#keymsg").innerHTML = `<div class="ok">Key works. Using <b>${model}</b>.</div>`;
+    setTimeout(() => { renderPicker(); show("s-pick"); }, 700);
+  }catch(e){
+    $("#keymsg").innerHTML = `<div class="err"><b>That key didn't work.</b><br>${String(e.message||e)}<br><br>Check you copied the whole thing, and that the key has credit on it.</div>`;
+  }
+  $("#savekey").classList.remove("off"); $("#savekey").textContent = "Save and continue";
+});
+$("#key").addEventListener("keydown", e => { if(e.key === "Enter") $("#savekey").click(); });
+
+$("#forget").addEventListener("click", () => {
+  dropKey(); apiKey = null; model = null;
+  $("#key").value = ""; $("#keymsg").innerHTML = '<div class="ok">Key removed from this browser.</div>';
+  show("s-key");
+});
+
+/* ======================= PICKER ======================= */
+function renderPicker(){
+  const groups = [...new Set(SCENES.map(s=>s.g))];
+  $("#scnGroups").innerHTML = groups.map(g => `
+    <div class="grp"><span class="mono">${g}</span><div class="cards">
+      ${SCENES.map((s,i)=>({s,i})).filter(x=>x.s.g===g).map(({s,i}) => `
+        <button class="sc" data-i="${i}">
+          <b>${s.t}</b><small>${s.sit}</small><span class="who">You'll be talking to ${s.who}</span>
+        </button>`).join("")}
+    </div></div>`).join("");
+  $("#scnGroups").querySelectorAll(".sc").forEach(b =>
+    b.addEventListener("click", () => openScene(SCENES[+b.dataset.i])));
+  paintUsage();
+}
+
+/* ======================= API ======================= */
+async function stream(system, messages, onText, maxTokens){
+  const r = await fetch(`${API}/messages`, {
+    method:"POST", headers: HEADERS(apiKey),
+    body: JSON.stringify({model, max_tokens: maxTokens||600, system, messages, stream:true})
+  });
+  if(!r.ok){
+    let m = `HTTP ${r.status}`;
+    try{ const j = await r.json(); m = (j.error && j.error.message) || m; }catch(e){}
+    throw new Error(m);
+  }
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = "", full = "";
+  for(;;){
+    const {done, value} = await reader.read();
+    if(done) break;
+    buf += dec.decode(value, {stream:true});
+    const lines = buf.split("\n"); buf = lines.pop();
+    for(const line of lines){
+      if(!line.startsWith("data:")) continue;
+      const raw = line.slice(5).trim();
+      if(!raw || raw === "[DONE]") continue;
+      let ev; try{ ev = JSON.parse(raw); }catch(e){ continue; }
+      if(ev.type === "content_block_delta" && ev.delta && ev.delta.text){
+        full += ev.delta.text; onText(full);
+      }
+      if(ev.type === "message_start" && ev.message && ev.message.usage) tokIn += ev.message.usage.input_tokens || 0;
+      if(ev.type === "message_delta" && ev.usage) tokOut += ev.usage.output_tokens || 0;
+    }
+  }
+  paintUsage();
+  return full;
+}
+
+function paintUsage(){
+  const t = `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out`;
+  const a = $("#useScene"), b = $("#usePick");
+  if(a) a.textContent = tokIn ? t : "";
+  if(b) b.textContent = tokIn ? "This session: " + t : "";
+}
+
+/* ======================= SCENE ======================= */
+function rolePrompt(){
+  return `You are playing a character in a spoken-conversation rehearsal. The person you are talking to is practising out loud, for real, and you are the other person in the scene.
+
+THE SCENE: ${scene.sit}
+YOUR CHARACTER: ${scene.role}
+WHAT THEY ARE TRYING TO DO: ${scene.goal}
+
+Rules, all strict:
+- Stay in character for the entire conversation. Never coach, never evaluate, never comment on how they are speaking, never break role, never mention that this is practice or that you are an AI.
+- Talk the way people talk out loud: one to three sentences, contractions, no bullet points, no markdown, no stage directions.
+- React honestly to how they handle it. If they ramble, show it — cut in, or let your attention drift. If they're vague, ask what a real person would ask. If they handle it well, respond accordingly and move things forward.
+- Never ask more than one question at a time.
+- Keep your lines shorter than theirs. Leave them room.
+
+Open the scene now with a single natural line.`;
+}
+
+function coachPrompt(m){
+  return `You are a communication coach. You just watched a rehearsal and you are giving the person feedback. You are direct and specific, and you do not flatter.
+
+THE SCENE: ${scene.t} — ${scene.sit}
+WHAT THEY WERE TRYING TO DO: ${scene.goal}
+
+MEASURED FACTS about what they actually said across the whole scene. These were counted, not estimated — use them and do not contradict them:
+- ${m.words} words across ${m.turns} turns, averaging ${m.avgTurn} words per turn
+- filler words: ${m.fillers} (${m.fillerRate} per 100 words) — above 5 per 100 is audible
+- hedging and qualifiers: ${m.hedges} (${m.hedgeRate} per 100 words)
+
+Write your feedback using exactly these three headings, verbatim:
+
+WHAT WORKED
+One thing, quoting their actual words. Say why it worked. If nothing did, say so plainly rather than inventing something.
+
+THE ONE THING TO CHANGE
+The single highest-leverage fix. One only, never a list. Quote the exact line of theirs that shows the problem, and refer to the measured facts above where they support the point.
+
+REWRITE
+Take their weakest single line and rewrite it as it should have been said. Show their version, then yours.
+
+Rules: under 250 words. No preamble, no sign-off, no markdown symbols. Do not congratulate them for practising. Never more than one thing to change.`;
+}
+
+function bubble(who, text){
+  const d = document.createElement("div");
+  d.className = "msg " + (who==="you" ? "you" : "them");
+  d.innerHTML = `<span class="who">${who==="you" ? "You" : scene.who}</span>`;
+  const s = document.createElement("span"); s.textContent = text; d.appendChild(s);
+  $("#thread").appendChild(d);
+  d.scrollIntoView({block:"end", behavior:"smooth"});
+  return d;
+}
+function thinking(){
+  const d = document.createElement("div");
+  d.className = "msg them";
+  d.innerHTML = `<span class="who">${scene.who}</span><span class="dots"><span></span><span></span><span></span></span>`;
+  $("#thread").appendChild(d);
+  d.scrollIntoView({block:"end", behavior:"smooth"});
+  return d;
+}
+function fillBubble(d, txt){
+  d.innerHTML = `<span class="who">${scene.who}</span>`;
+  const s = document.createElement("span"); s.textContent = txt; d.appendChild(s);
+}
+const showErr = e => { $("#scErr").innerHTML = `<div class="err"><b>The API call failed.</b><br>${String(e.message||e).slice(0,400)}</div>`; };
+
+async function openScene(s){
+  scene = s; history = []; ended = false;
+  $("#scLabel").textContent = s.g + " · with " + s.who;
+  $("#scTitle").textContent = s.t;
+  $("#scSit").textContent = s.sit;
+  $("#scGoal").textContent = s.goal;
+  $("#thread").innerHTML = ""; $("#scErr").innerHTML = ""; $("#ta").value = "";
+  $("#end").classList.remove("off"); $("#send").classList.remove("off");
+  $("#hint").textContent = SR ? "Press the mic and say your line." : "Type your line — this browser can't transcribe speech.";
+  show("s-scene");
+  const t = thinking();
+  try{
+    const first = await stream(rolePrompt(), [{role:"user", content:"[Begin the scene.]"}], txt => fillBubble(t, txt));
+    history.push({role:"user", content:"[Begin the scene.]"});
+    history.push({role:"assistant", content:first});
+  }catch(e){ t.remove(); showErr(e); }
+}
+
+async function send(){
+  const text = $("#ta").value.trim();
+  if(!text || ended) return;
+  $("#ta").value = "";
+  bubble("you", text);
+  history.push({role:"user", content:text});
+  $("#send").classList.add("off");
+  const t = thinking();
+  try{
+    const reply = await stream(rolePrompt(), history, txt => fillBubble(t, txt));
+    history.push({role:"assistant", content:reply});
+  }catch(e){ t.remove(); showErr(e); }
+  $("#send").classList.remove("off");
+  $("#ta").focus();
+}
+
+/* ======================= METRICS + COACHING ======================= */
+const FILLERS = ["you know what i mean","you know","i mean","sort of","kind of","kinda","sorta","um","umm","uh","uhh","er","erm","like","basically","literally","obviously","honestly","anyway","yeah"];
+const HEDGES  = ["i think","i guess","i suppose","i feel like","maybe","perhaps","probably","possibly","hopefully","might","just want","just wanted","just wondering","a bit","a little","fairly","somewhat","pretty much","or something","if that makes sense"];
+
+function metrics(){
+  const said = history.filter(m => m.role==="user" && m.content !== "[Begin the scene.]");
+  const text = said.map(m=>m.content).join(" ");
+  const clean = text.trim().replace(/\s+/g," ");
+  const lower = " " + clean.toLowerCase().replace(/[^a-z0-9'\s]/g," ").replace(/\s+/g," ") + " ";
+  const words = clean ? clean.split(/\s+/).length : 0;
+  const count = list => list.reduce((n,p) => {
+    const m = lower.match(new RegExp("(?<=\\s)"+p.replace(/ /g,"\\s+")+"(?=\\s)","g"));
+    return n + (m?m.length:0);
+  },0);
+  const f = count(FILLERS), h = count(HEDGES);
+  const per = c => words ? +(c/words*100).toFixed(1) : 0;
+  return {words, turns:said.length, avgTurn: said.length?Math.round(words/said.length):0,
+          fillers:f, fillerRate:per(f), hedges:h, hedgeRate:per(h), text:clean};
+}
+
+async function endScene(){
+  if(ended) return;
+  const m = metrics();
+  if(m.turns === 0){ $("#hint").textContent = "Say something first."; return; }
+  ended = true;
+  $("#end").classList.add("off"); $("#send").classList.add("off");
+
+  const band = (v,ok,mid) => v<=ok?"good":v<=mid?"warn":"bad";
+  const cards = [
+    {k:"Filler rate", v:m.fillerRate, u:"per 100 words", b:band(m.fillerRate,2,5)},
+    {k:"Hedging",     v:m.hedgeRate,  u:"per 100 words", b:band(m.hedgeRate,2,4.5)},
+    {k:"Avg turn",    v:m.avgTurn,    u:"words",         b:"flat"},
+    {k:"Turns",       v:m.turns,      u:"total",         b:"flat"}
+  ];
+
+  $("#s-coach").innerHTML = `
+    <div class="head">
+      <span class="mono">Scene over · ${scene.t}</span>
+      <h1>What you actually did</h1>
+      <div class="grid">${cards.map(c=>`<div class="stat ${c.b}"><div class="k">${c.k}</div><div class="v">${c.v} <u>${c.u}</u></div></div>`).join("")}</div>
+      <div class="coach"><span class="mono">Coaching</span><div class="body" id="cbody"></div></div>
+      <div id="coachErr"></div>
+      <div class="acts">
+        <button class="btn" id="againSame">Run this scene again</button>
+        <button class="btn ghost" id="pickNew">Pick another scene</button>
+        <span class="usage" id="useCoach"></span>
+      </div>
+      <p class="disc">Unlimited means unlimited — run it as many times as you like. The only cost is your own API usage, shown above in tokens.</p>
+    </div>`;
+  show("s-coach");
+  $("#againSame").addEventListener("click", () => openScene(scene));
+  $("#pickNew").addEventListener("click", () => { renderPicker(); show("s-pick"); });
+
+  const convo = history.filter(x => x.content !== "[Begin the scene.]")
+    .map(x => (x.role==="user" ? "THEM: " : "CHARACTER: ") + x.content).join("\n\n");
+  try{
+    await stream(coachPrompt(m),
+      [{role:"user", content:"Here is the full scene transcript:\n\n"+convo+"\n\nGive your feedback now."}],
+      txt => { const b = $("#cbody"); if(b) b.textContent = txt; }, 700);
+  }catch(e){
+    const el = $("#coachErr"); if(el) el.innerHTML = `<div class="err"><b>Couldn't get coaching.</b><br>${String(e.message||e).slice(0,300)}</div>`;
+  }
+  const u = $("#useCoach"); if(u) u.textContent = `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out`;
+}
+
+/* ======================= SPEECH ======================= */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recog = null, listening = false, base = "";
+$("#mic").addEventListener("click", () => {
+  if(!SR){ $("#hint").textContent = "This browser can't transcribe speech — Chrome or Edge can. Type instead."; return; }
+  if(listening){
+    listening = false; try{ recog.stop(); }catch(e){}
+    $("#mic").classList.remove("live"); $("#hint").textContent = "Check it reads right, then send.";
+    return;
+  }
+  base = $("#ta").value ? $("#ta").value + " " : "";
+  listening = true; $("#mic").classList.add("live"); $("#hint").textContent = "Listening — say your line.";
+  recog = new SR();
+  recog.continuous = true; recog.interimResults = true; recog.lang = navigator.language || "en-US";
+  let fin = "";
+  recog.onresult = ev => {
+    let interim = "";
+    for(let i=ev.resultIndex;i<ev.results.length;i++){
+      const r = ev.results[i];
+      if(r.isFinal) fin += r[0].transcript + " "; else interim += r[0].transcript;
+    }
+    $("#ta").value = (base + fin + interim).replace(/\s+/g," ").trim();
+  };
+  recog.onerror = ev => { if(ev.error === "not-allowed"){ listening=false; $("#mic").classList.remove("live"); $("#hint").textContent = "Mic blocked. Type instead."; } };
+  recog.onend = () => { if(listening) try{ recog.start(); }catch(e){} };
+  try{ recog.start(); }catch(e){}
+});
+
+$("#send").addEventListener("click", send);
+$("#end").addEventListener("click", endScene);
+$("#ta").addEventListener("keydown", e => {
+  if(e.key === "Enter" && (e.metaKey || e.ctrlKey)){ e.preventDefault(); send(); }
+});
+
+/* ======================= BOOT ======================= */
+(async function(){
+  const k = loadKey();
+  if(!k) return;
+  apiKey = k;
+  $("#key").value = "";
+  try{
+    model = await pickModel(k);
+    renderPicker(); show("s-pick");
+  }catch(e){
+    $("#keymsg").innerHTML = `<div class="err"><b>Your saved key stopped working.</b><br>${String(e.message||e)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>
