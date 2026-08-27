@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Speech Report — The Practice Room</title>
+<meta name="description" content="Pick what you're practising, get a scenario, speak for 45 seconds. Then see your pauses and trailing sentences marked on your own waveform.">
+<meta name="theme-color" content="#0C6E75">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127908;</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/base.css">
+<style>
+.wrap{max-width:680px;margin:0 auto;padding:0 20px 90px}
+@media(max-width:560px){.wrap{padding:0 16px 66px}}
+.stage{display:none;animation:rise .35s cubic-bezier(.2,.7,.3,1) both}
+.stage.live{display:block}
+@keyframes rise{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+
+/* setup */
+.head{padding:clamp(36px,6vw,60px) 0 0}
+.head .mono{color:var(--accent);display:block;margin-bottom:14px}
+.head h1{font-family:var(--serif);font-size:clamp(2.1rem,6.2vw,3rem);line-height:1.03;max-width:16ch}
+.head p{color:var(--ink-2);margin-top:18px;font-size:1.05rem;max-width:54ch}
+.pickq{font-weight:600;margin:32px 0 12px;font-size:1rem}
+.cats{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+@media(max-width:520px){.cats{grid-template-columns:1fr}}
+.cat{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);
+  border-radius:11px;padding:15px 16px;text-align:left;transition:border-color .15s,background .15s}
+.cat:hover{border-color:var(--accent)}
+.cat.on{border-color:var(--accent);background:var(--accent-soft)}
+.cat .rad{flex:none;width:17px;height:17px;border-radius:50%;border:1.5px solid var(--line);position:relative}
+.cat.on .rad{border-color:var(--accent)}
+.cat.on .rad::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--accent)}
+.cat b{font-weight:600;font-size:.97rem;display:block}
+.cat small{color:var(--ink-3);font-size:.83rem;display:block;margin-top:2px}
+.startrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px;align-items:center}
+.privacy{margin-top:26px;font-size:.87rem;color:var(--ink-3);border-top:1px solid var(--line);padding-top:18px}
+.privacy b{color:var(--ink-2);font-weight:600}
+
+/* scenario + record */
+.scn{padding:clamp(30px,5vw,48px) 0 0}
+.scn .mono{color:var(--accent);display:block;margin-bottom:12px}
+.scn h2{font-family:var(--serif);font-size:clamp(1.7rem,5vw,2.3rem);line-height:1.1}
+.scnbox{margin-top:18px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+.scnbox p{font-size:1.1rem;line-height:1.6}
+.scnbox .aim{margin-top:15px;padding-top:15px;border-top:1px solid var(--line);font-size:.93rem;color:var(--ink-2)}
+.scnbox .aim b{color:var(--accent);font-family:var(--mono);font-size:.63rem;letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:5px}
+
+.recbox{margin-top:16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:26px 24px;text-align:center}
+.ring{position:relative;width:132px;height:132px;margin:0 auto}
+.ring svg{transform:rotate(-90deg);width:100%;height:100%}
+.ring .trk{fill:none;stroke:var(--surface-2);stroke-width:7}
+.ring .arc{fill:none;stroke:var(--accent);stroke-width:7;stroke-linecap:round;transition:stroke-dashoffset .25s linear}
+.ring .mid{position:absolute;inset:0;display:grid;place-items:center}
+.ring .mid b{font-family:var(--mono);font-size:1.9rem;font-weight:500;font-variant-numeric:tabular-nums;line-height:1}
+.ring .mid s{text-decoration:none;font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.1em;color:var(--ink-3);display:block;margin-top:4px}
+.lvl{display:flex;align-items:flex-end;justify-content:center;gap:3px;height:30px;margin-top:18px}
+.lvl i{width:3.5px;background:var(--accent);border-radius:2px;height:3px;transition:height .07s linear}
+.recstate{margin-top:14px;font-size:.95rem;color:var(--ink-2)}
+.recbtn{margin-top:18px}
+.livetx{margin-top:16px;background:var(--inset);border:1px solid var(--line);border-radius:11px;padding:14px 16px;
+  font-size:.95rem;line-height:1.6;color:var(--ink-2);text-align:left;min-height:56px}
+.livetx:empty::before{content:"Your words will appear here as you speak.";color:var(--ink-3)}
+
+/* analysing */
+.anz{padding:clamp(50px,9vw,80px) 0 0;text-align:center}
+.anz h2{font-family:var(--serif);font-size:clamp(1.7rem,5vw,2.2rem);line-height:1.1;margin-bottom:26px}
+.steps{display:flex;flex-direction:column;gap:15px;max-width:400px;margin:0 auto;text-align:left}
+.stp .top{display:flex;justify-content:space-between;font-size:.93rem;margin-bottom:6px}
+.stp .top b{font-weight:500}
+.stp .top span{font-family:var(--mono);font-size:.78rem;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.stp .tr{height:5px;background:var(--surface-2);border-radius:99px;overflow:hidden}
+.stp .fl{height:100%;width:0;background:var(--accent);border-radius:99px;transition:width .35s ease}
+
+/* results */
+.res{padding:clamp(30px,5vw,46px) 0 0}
+.scorerow{display:flex;gap:22px;align-items:center;flex-wrap:wrap}
+.sring{position:relative;width:112px;height:112px;flex:none}
+.sring svg{transform:rotate(-90deg);width:100%;height:100%}
+.sring .trk{fill:none;stroke:var(--surface-2);stroke-width:8}
+.sring .arc{fill:none;stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset 1.1s cubic-bezier(.2,.8,.3,1)}
+.sring .mid{position:absolute;inset:0;display:grid;place-items:center;line-height:1}
+.sring .mid b{font-family:var(--mono);font-size:2.05rem;font-weight:500;font-variant-numeric:tabular-nums}
+.sring .mid s{text-decoration:none;font-family:var(--mono);font-size:.62rem;color:var(--ink-3);display:block;margin-top:3px;text-align:center}
+.scoretx{flex:1;min-width:200px}
+.scoretx .mono{color:var(--ink-3);display:block;margin-bottom:7px}
+.scoretx h1{font-family:var(--serif);font-size:clamp(1.7rem,5vw,2.3rem);line-height:1.08}
+.scoretx p{color:var(--ink-2);font-size:.93rem;margin-top:9px}
+
+.chips{display:flex;gap:9px;margin-top:24px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+.chipm{flex:none;min-width:132px;background:var(--surface);border:1.5px solid var(--line);border-radius:12px;
+  padding:13px 15px;text-align:left;transition:border-color .15s,transform .12s}
+.chipm:hover{transform:translateY(-2px)}
+.chipm.on{border-color:currentColor}
+.chipm .k{font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+.chipm .v{font-family:var(--mono);font-size:1.15rem;font-weight:500;color:var(--ink);margin:6px 0 8px;font-variant-numeric:tabular-nums}
+.chipm .v u{text-decoration:none;font-size:.62rem;color:var(--ink-3)}
+.chipm .tr{height:4px;background:var(--surface-2);border-radius:99px;overflow:hidden}
+.chipm .fl{height:100%;border-radius:99px;background:currentColor;width:0;transition:width .8s ease}
+
+.player{margin-top:18px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
+.player h3{font-weight:600;font-size:1rem;margin-bottom:4px}
+.player .ph{font-size:.86rem;color:var(--ink-3);margin-bottom:16px}
+.pw{display:flex;gap:15px;align-items:center}
+.play{flex:none;width:50px;height:50px;border-radius:50%;background:var(--ink);color:var(--ground);display:grid;place-items:center;transition:transform .13s}
+.play:hover{transform:scale(1.07)}
+.play svg{width:17px;height:17px;fill:currentColor}
+.wfwrap{flex:1;min-width:0;position:relative}
+canvas.wf{width:100%;height:58px;display:block;cursor:pointer}
+.mk{position:absolute;top:-9px;width:21px;height:21px;border-radius:50%;display:grid;place-items:center;
+  font-family:var(--mono);font-size:.63rem;font-weight:600;color:#fff;transform:translateX(-50%);
+  cursor:pointer;transition:transform .14s;border:2px solid var(--surface)}
+.mk:hover,.mk.sel{transform:translateX(-50%) scale(1.22)}
+.playhead{position:absolute;top:0;bottom:0;width:1.5px;background:var(--ink);opacity:.5;transform:translateX(-50%);pointer-events:none;display:none}
+.times{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.66rem;color:var(--ink-3);margin-top:7px;font-variant-numeric:tabular-nums}
+.nomk{font-size:.87rem;color:var(--ink-3);margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+
+.moments{margin-top:16px}
+.moments > .mono{color:var(--accent);display:block;margin-bottom:11px}
+.moment{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:9px;
+  display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start;cursor:pointer;transition:border-color .15s}
+.moment:hover{border-color:var(--accent)}
+.moment.sel{border-color:var(--accent);background:var(--accent-soft)}
+.mnum{width:23px;height:23px;border-radius:50%;display:grid;place-items:center;font-family:var(--mono);
+  font-size:.66rem;font-weight:600;color:#fff;flex:none}
+.mbody h4{font-weight:600;font-size:.97rem;display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
+.mbody h4 span{font-family:var(--mono);font-size:.66rem;color:var(--ink-3);font-weight:600;font-variant-numeric:tabular-nums}
+.mbody p{font-size:.92rem;color:var(--ink-2);margin-top:6px}
+.mbody .fix{font-size:.89rem;color:var(--ink-3);margin-top:8px;font-style:italic}
+
+.tscript{margin-top:18px;background:var(--inset);border:1px solid var(--line);border-radius:12px;padding:18px 20px;
+  font-size:.99rem;line-height:1.75;color:var(--ink-2)}
+.tscript .mono{display:block;color:var(--ink-3);margin-bottom:10px}
+.howto{margin-top:18px}
+.howto summary{cursor:pointer;font-weight:600;font-size:.93rem;list-style:none;display:flex;gap:9px;align-items:center;
+  padding:15px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.howto summary::-webkit-details-marker{display:none}
+.howto summary::before{content:"▸";color:var(--accent);transition:transform .18s}
+.howto[open] summary{border-radius:12px 12px 0 0;border-bottom:none}
+.howto[open] summary::before{transform:rotate(90deg)}
+.howto .hb{background:var(--surface);border:1px solid var(--line);border-top:1px solid var(--line);
+  border-radius:0 0 12px 12px;padding:16px 18px}
+.howto .hb p{font-size:.9rem;color:var(--ink-2)}
+.howto .hb p + p{margin-top:9px}
+.howto .hb code{font-family:var(--mono);font-size:.85em;background:var(--surface-2);border-radius:4px;padding:1px 5px}
+.acts{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px}
+.disc{font-size:.85rem;color:var(--ink-3);margin-top:30px;padding-top:19px;border-top:1px solid var(--line)}
+.err{background:var(--bad-bg);color:var(--bad);border-radius:11px;padding:14px 17px;font-size:.92rem;margin-top:16px}
+</style>
+</head>
+<body>
+
+<header class="bar"><div class="bar-in">
+  <a class="mark" href="./">The <em>Practice</em> Room</a>
+  <div class="bar-sp"></div>
+  <nav class="bar-nav">
+    <a href="report.html" aria-current="page">Speech report</a>
+    <a href="check.html">Assessment</a>
+    <a href="train.html">28 days</a>
+    <a href="blog.html">Reading</a>
+  </nav>
+</div></header>
+
+<main class="wrap">
+
+<!-- 1 · SETUP -->
+<section class="stage live" id="s-setup">
+  <div class="head">
+    <span class="mono">Speech report · about 2 minutes</span>
+    <h1>Hear what you actually sound like.</h1>
+    <p>Pick something to practise, get a scenario you haven't seen, and speak for forty-five seconds. Then your pauses and trailing sentences are marked on your own waveform, so you can listen to the exact moment rather than take our word for it.</p>
+    <p class="pickq">What are you practising?</p>
+    <div class="cats" id="cats"></div>
+    <div class="startrow">
+      <button class="btn" id="start">Start practice</button>
+      <span id="micwarn" style="font-size:.87rem;color:var(--ink-3)"></span>
+    </div>
+    <p class="privacy"><b>Your recording never leaves this device.</b> There is no server here — the audio is analysed in your browser and thrown away when you close the tab. Nothing is uploaded, nothing is stored, nothing is kept for thirty days.</p>
+  </div>
+</section>
+
+<!-- 2 · RECORD -->
+<section class="stage" id="s-rec">
+  <div class="scn">
+    <span class="mono" id="scnCat"></span>
+    <h2>Here's your scenario</h2>
+    <div class="scnbox">
+      <p id="scnText"></p>
+      <div class="aim"><b>What you're aiming for</b><span id="scnAim"></span></div>
+    </div>
+
+    <div class="recbox">
+      <div class="ring">
+        <svg viewBox="0 0 100 100"><circle class="trk" cx="50" cy="50" r="44"/><circle class="arc" id="arc" cx="50" cy="50" r="44"/></svg>
+        <div class="mid"><div><b id="clock">45</b><s>seconds left</s></div></div>
+      </div>
+      <div class="lvl" id="lvl"></div>
+      <div class="recstate" id="recstate">Press record and start talking.</div>
+      <div class="recbtn"><button class="btn" id="recbtn">Record</button></div>
+      <div class="livetx" id="livetx"></div>
+      <div id="recerr"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 · ANALYSING -->
+<section class="stage" id="s-anz">
+  <div class="anz">
+    <h2>Reading your recording</h2>
+    <div class="steps" id="steps"></div>
+  </div>
+</section>
+
+<!-- 4 · RESULTS -->
+<section class="stage" id="s-res"></section>
+
+</main>
+
+<footer class="foot"><div class="foot-in">
+  <div class="links"><a href="./">Home</a><a href="report.html">Speech report</a><a href="check.html">Assessment</a><a href="train.html">28 days</a><a href="blog.html">Reading</a></div>
+  <div class="bar-sp"></div>
+  <p>Audio is analysed in your browser and never uploaded or saved.</p>
+</div></footer>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const fmt = t => Math.floor(t/60) + ":" + String(Math.floor(t%60)).padStart(2,"0");
+
+/* ============================ SCENARIOS ============================ */
+const CATS = [
+  {id:"small",  name:"Small talk",       blurb:"Openers, strangers, keeping it alive", secs:45},
+  {id:"work",   name:"Speaking at work",  blurb:"Updates, meetings, explaining things", secs:45},
+  {id:"interview", name:"Job interview",  blurb:"The questions you can't fully prepare", secs:60},
+  {id:"raise",  name:"Asking for more",   blurb:"Raises, deadlines, saying no",         secs:45},
+  {id:"dating", name:"Dating",            blurb:"Interest, stories, awkward moments",   secs:45},
+  {id:"hard",   name:"Difficult conversations", blurb:"Feedback, disagreement, apologies", secs:50}
+];
+
+const SCN = {
+small:[
+ {s:"You bump into a neighbour you've spoken to twice. They ask how you've been. Answer, and give them something to ask about.", a:"Two sentences: the answer, plus one detail they can grab onto. Then stop."},
+ {s:"You're in a slow queue and the person next to you catches your eye. Open a conversation about the situation you're both in.", a:"One line about the shared situation. A statement invites more than a question does."},
+ {s:"At a party, someone asks what you do. Answer so the conversation continues instead of ending.", a:"Skip the job title. Say what your days look like, and include one odd, specific detail."},
+ {s:"Someone just told you they've moved back from abroad after six years. Respond.", a:"Take the most specific thing they said and ask about that, not about the country."},
+ {s:"You're the first to arrive at a small gathering. The host is busy. One other guest is standing alone.", a:"Open on the room, the host, or the occasion — the shared reference is always there."}
+],
+work:[
+ {s:"Status meeting. It's your turn. Give an update on something you're genuinely working on right now.", a:"Headline first. The opening sentence should stand alone if they stop listening after it."},
+ {s:"Explain something you understand well to a smart person with zero background in it.", a:"An analogy in the first fifteen seconds. No unexplained jargon."},
+ {s:"Someone senior asks you a direct question in front of others and you don't know the answer.", a:"Admit it in the first sentence, then give them what you do know and a time you'll have the rest."},
+ {s:"You have two minutes to convince the room to stop doing something that isn't working.", a:"Claim, one reason, one concrete example, then the ask. In that order."},
+ {s:"A new starter asks what your team actually does all day. Tell them.", a:"Plain words. If a sentence needs a glossary, cut it."}
+],
+interview:[
+ {s:"“Tell me about yourself.” Sixty seconds, starting now.", a:"Where you are, one thing you did that shows what you're good at, why this role. Not a CV read-aloud."},
+ {s:"“What's your biggest weakness?” Answer honestly.", a:"A real one, a real cost that actually happened, and the system you use to contain it."},
+ {s:"“Tell me about a time something went wrong.”", a:"One incident, what you did, what changed afterwards. Don't hide the part where it was your fault."},
+ {s:"“Why are you leaving your current job?”", a:"Forward-looking and specific. Never a complaint, even a justified one."},
+ {s:"“Do you have any questions for us?” You do. Ask them out loud.", a:"Ask about something you'd actually need to know to do the job well."}
+],
+raise:[
+ {s:"Ask your manager for a raise. Say the whole thing out loud.", a:"The number in the first sentence. Then the reasoning, once. Then stop talking."},
+ {s:"A deadline is impossible. Tell the person who set it.", a:"Say it's not achievable, say what is, and offer the trade you'd make."},
+ {s:"Say no to something you'd normally agree to out of habit.", a:"No, briefly why, and what you can do instead if anything. No apology spiral."},
+ {s:"Ask someone for a favour that's genuinely inconvenient for them.", a:"Name the inconvenience yourself before they have to. Then make it easy to decline."},
+ {s:"You've done work that got credited to someone else. Raise it.", a:"Describe what happened without accusing anyone. Then say what you want to happen next time."}
+],
+dating:[
+ {s:"You're talking to someone you find genuinely interesting. Show it, without complimenting their appearance.", a:"Specific attention to something they said. Curiosity is the signal."},
+ {s:"Tell a true story from your life in under a minute. It must have a moment where something changes.", a:"Start as late into the story as you can. Land on the change, not a moral."},
+ {s:"A first date is going well. Suggest a second one.", a:"Specific, low-pressure, and easy to say no to. Vague plans die."},
+ {s:"They asked what you're looking for. Answer honestly.", a:"Say the true thing plainly. Hedging it into a joke wastes the moment."},
+ {s:"You said something that landed badly thirty seconds ago. Recover.", a:"Name it lightly in one short line, then genuinely move on."}
+],
+hard:[
+ {s:"Someone you work with keeps doing something that's a real problem. Tell them.", a:"Behaviour, effect, request. Describe what they did, not what they are."},
+ {s:"Someone has just told you that you handled something badly, and they're partly right. Respond.", a:"Acknowledge the true part first, without defending. Then ask for specifics."},
+ {s:"There's a conversation you've been avoiding. Say its opening thirty seconds.", a:"Name the topic and your intention in the first two sentences. No long preamble."},
+ {s:"You need to apologise for something that actually mattered.", a:"What you did, the effect it had, what changes. No explanation of why it wasn't really your fault."},
+ {s:"Disagree with a decision that's already been made, without relitigating it.", a:"Restate their reasoning fairly, then name the specific risk, then offer a test rather than a verdict."}
+]};
+
+/* ============================ STATE ============================ */
+let cat = CATS[0], scenario = null, targetSecs = 45;
+let stream=null, mediaRec=null, chunks=[], recog=null, running=false;
+let t0=0, tick=null, rafId=null, audioCtx=null, blobUrl=null, transcript="";
+let audioEl=null, analysis=null, selMetric=null, selMarker=null;
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const stages = ["s-setup","s-rec","s-anz","s-res"];
+const show = id => { stages.forEach(s => $("#"+s).classList.toggle("live", s===id)); window.scrollTo({top:0}); };
+
+/* ============================ SETUP ============================ */
+$("#cats").innerHTML = CATS.map((c,i) =>
+  `<button class="cat${i===0?" on":""}" data-i="${i}"><span class="rad"></span><span><b>${c.name}</b><small>${c.blurb}</small></span></button>`
+).join("");
+$("#cats").addEventListener("click", e => {
+  const b = e.target.closest(".cat"); if(!b) return;
+  [...$("#cats").children].forEach(x => x.classList.remove("on"));
+  b.classList.add("on"); cat = CATS[+b.dataset.i];
+});
+if(!navigator.mediaDevices || !window.MediaRecorder){
+  $("#micwarn").textContent = "This browser can't record audio.";
+  $("#start").classList.add("off");
+} else if(!SR){
+  $("#micwarn").textContent = "Speech-to-text isn't supported here, so you'll type your words after recording.";
+}
+
+$("#start").addEventListener("click", () => {
+  const bank = SCN[cat.id];
+  scenario = bank[Math.floor(Math.random()*bank.length)];
+  targetSecs = cat.secs;
+  $("#scnCat").textContent = cat.name;
+  $("#scnText").textContent = scenario.s;
+  $("#scnAim").textContent = scenario.a;
+  $("#clock").textContent = targetSecs;
+  setArc(1);
+  $("#lvl").innerHTML = "<i></i>".repeat(22);
+  $("#livetx").textContent = ""; $("#recerr").innerHTML = "";
+  $("#recstate").textContent = "Read it, take a breath, then press record.";
+  $("#recbtn").textContent = "Record"; $("#recbtn").classList.remove("off");
+  show("s-rec");
+});
+
+const ARC_LEN = 2*Math.PI*44;
+$("#arc").style.strokeDasharray = ARC_LEN;
+function setArc(frac){ $("#arc").style.strokeDashoffset = ARC_LEN*(1-frac); }
+
+/* ============================ RECORD ============================ */
+$("#recbtn").addEventListener("click", () => running ? stopRec(false) : startRec());
+
+async function startRec(){
+  chunks=[]; transcript=""; $("#livetx").textContent=""; $("#recerr").innerHTML="";
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({audio:true});
+  }catch(e){
+    $("#recerr").innerHTML = '<div class="err"><b>No microphone access.</b> Allow the mic for this site in your browser, then try again. On iPhone, Safari may block it entirely.</div>';
+    return;
+  }
+  running = true; t0 = Date.now();
+  $("#recbtn").textContent = "Stop";
+  $("#recstate").textContent = "Recording. Speak until you've finished the job, not until the timer runs out.";
+
+  try{ mediaRec = new MediaRecorder(stream); }
+  catch(e){ mediaRec = new MediaRecorder(stream, {mimeType:"audio/webm"}); }
+  mediaRec.ondataavailable = e => { if(e.data.size) chunks.push(e.data); };
+  mediaRec.start();
+  meterOn(stream);
+
+  tick = setInterval(() => {
+    const el = (Date.now()-t0)/1000, left = Math.max(0, targetSecs-el);
+    $("#clock").textContent = Math.ceil(left);
+    setArc(left/targetSecs);
+    if(left <= 0) stopRec(true);
+  }, 120);
+
+  if(SR){
+    try{
+      recog = new SR();
+      recog.continuous = true; recog.interimResults = true; recog.lang = navigator.language || "en-US";
+      let fin = "";
+      recog.onresult = ev => {
+        let interim = "";
+        for(let i=ev.resultIndex;i<ev.results.length;i++){
+          const r = ev.results[i];
+          if(r.isFinal) fin += r[0].transcript + " "; else interim += r[0].transcript;
+        }
+        transcript = (fin + interim).replace(/\s+/g," ").trim();
+        $("#livetx").textContent = transcript;
+      };
+      recog.onend = () => { if(running) try{ recog.start(); }catch(e){} };
+      recog.start();
+    }catch(e){}
+  }
+}
+
+function meterOn(s){
+  try{
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(s), an = audioCtx.createAnalyser();
+    an.fftSize = 64; src.connect(an);
+    const buf = new Uint8Array(an.frequencyBinCount), bars = $("#lvl").children;
+    (function loop(){
+      an.getByteFrequencyData(buf);
+      for(let i=0;i<bars.length;i++) bars[i].style.height = Math.max(3,(buf[i]||0)/255*30) + "px";
+      rafId = requestAnimationFrame(loop);
+    })();
+  }catch(e){}
+}
+
+function stopRec(auto){
+  if(!running) return;
+  running = false;
+  clearInterval(tick); cancelAnimationFrame(rafId);
+  const dur = Math.min((Date.now()-t0)/1000, targetSecs);
+  if(recog) try{ recog.stop(); }catch(e){}
+  $("#recbtn").classList.add("off");
+  $("#recstate").textContent = auto ? "Time. Reading it now…" : "Reading it now…";
+
+  mediaRec.onstop = async () => {
+    if(stream) stream.getTracks().forEach(t => t.stop());
+    if(audioCtx) try{ await audioCtx.close(); }catch(e){}
+    const blob = new Blob(chunks, {type: mediaRec.mimeType || "audio/webm"});
+    if(blobUrl) URL.revokeObjectURL(blobUrl);
+    blobUrl = URL.createObjectURL(blob);
+    runAnalysis(blob, dur);
+  };
+  try{ mediaRec.stop(); }catch(e){ $("#recerr").innerHTML = '<div class="err">Recording failed. Try again.</div>'; }
+}
+
+/* ============================ ANALYSIS ============================ */
+const FILLERS = ["you know what i mean","you know","i mean","sort of","kind of","kinda","sorta","um","umm","uh","uhh","er","erm","like","basically","literally","obviously","honestly","anyway","yeah"];
+const HEDGES  = ["i think","i guess","i suppose","i feel like","maybe","perhaps","probably","possibly","hopefully","might","just want","just wanted","just wondering","a bit","a little","fairly","somewhat","pretty much","or something","if that makes sense"];
+
+async function decodePCM(blob){
+  const ctx = new (window.AudioContext||window.webkitAudioContext)();
+  const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+  const out = {pcm: buf.getChannelData(0), sr: buf.sampleRate, dur: buf.duration};
+  try{ ctx.close(); }catch(e){}
+  return out;
+}
+
+/* Frame the signal at 20ms and find where speech actually is. */
+function envelope(pcm, sr){
+  const F = Math.max(1, Math.round(sr*0.02));
+  const n = Math.floor(pcm.length/F);
+  const rms = new Float32Array(n);
+  for(let i=0;i<n;i++){
+    let s=0;
+    for(let j=0;j<F;j++){ const v=pcm[i*F+j]; s+=v*v; }
+    rms[i] = Math.sqrt(s/F);
+  }
+  return {rms, hop:0.02, n};
+}
+
+function runsOf(flags){
+  const out=[]; let st=null;
+  for(let i=0;i<flags.length;i++){
+    if(flags[i] && st===null) st=i;
+    if((!flags[i] || i===flags.length-1) && st!==null){
+      const end = flags[i] ? i+1 : i;
+      out.push([st,end]); st=null;
+    }
+  }
+  return out;
+}
+
+function analyseAudio(pcm, sr){
+  const {rms, hop, n} = envelope(pcm, sr);
+  if(n < 20) return null;
+  const sorted = Array.from(rms).sort((a,b)=>a-b);
+  const q = p => sorted[Math.min(sorted.length-1, Math.floor(sorted.length*p))];
+  const floor = q(0.15), peak = q(0.95);
+  if(peak <= 1e-5) return {silent:true};
+  const thr = Math.max(floor*2.2, peak*0.10);
+
+  const voiced = Array.from(rms, v => v > thr);
+  // smooth: fill single-frame holes so natural stop consonants don't read as pauses
+  for(let i=1;i<n-1;i++) if(!voiced[i] && voiced[i-1] && voiced[i+1]) voiced[i]=true;
+
+  const speech = runsOf(voiced);
+  const silence = runsOf(voiced.map(v=>!v));
+  const speechSecs = speech.reduce((a,[s,e])=>a+(e-s)*hop, 0);
+  const firstV = speech.length ? speech[0][0]*hop : 0;
+  const lastV  = speech.length ? speech[speech.length-1][1]*hop : 0;
+
+  const events = [];
+
+  // 1. long pauses, interior only
+  silence.forEach(([s,e]) => {
+    const st=s*hop, en=e*hop, len=en-st;
+    if(st <= firstV+0.05 || en >= lastV-0.05) return;
+    if(len >= 0.75) events.push({type:"pause", t:st, len, mid:st+len/2});
+  });
+
+  // 2. trailing off: loudness collapse at the end of a speech run
+  speech.forEach(([s,e]) => {
+    const len=(e-s)*hop;
+    if(len < 1.6) return;
+    const tailFrames = Math.max(8, Math.round(0.4/hop));
+    if(e-s <= tailFrames+8) return;
+    let body=0, bn=0, tail=0, tn=0;
+    for(let i=s;i<e-tailFrames;i++){ body+=rms[i]; bn++; }
+    for(let i=e-tailFrames;i<e;i++){ tail+=rms[i]; tn++; }
+    body/=Math.max(1,bn); tail/=Math.max(1,tn);
+    if(body>0 && tail/body < 0.45)
+      events.push({type:"trail", t:(e-tailFrames)*hop, drop:Math.round((1-tail/body)*100), mid:(e-tailFrames/2)*hop});
+  });
+
+  // 3. runs with no breath
+  speech.forEach(([s,e]) => {
+    const len=(e-s)*hop;
+    if(len >= 11) events.push({type:"run", t:s*hop, len, mid:(s+e)/2*hop});
+  });
+
+  events.sort((a,b)=>a.t-b.t);
+  return {rms, hop, n, thr, speechSecs, firstV, lastV, events, peak};
+}
+
+function analyseText(text, speechSecs){
+  const clean = text.trim().replace(/\s+/g," ");
+  const lower = " " + clean.toLowerCase().replace(/[^a-z0-9'\s]/g," ").replace(/\s+/g," ") + " ";
+  const words = clean ? clean.split(/\s+/).length : 0;
+  const count = list => list.reduce((n,p) => {
+    const m = lower.match(new RegExp("(?<=\\s)"+p.replace(/ /g,"\\s+")+"(?=\\s)","g"));
+    return n + (m?m.length:0);
+  },0);
+  const f = count(FILLERS), h = count(HEDGES);
+  const per = c => words ? +(c/words*100).toFixed(1) : 0;
+  const wpm = speechSecs > 0.5 ? Math.round(words/(speechSecs/60)) : 0;
+  let marked = clean.replace(/</g,"&lt;");
+  const wrap = (list,cls) => { for(const p of list) marked = marked.replace(new RegExp("\\b("+p.replace(/ /g,"\\s+")+")\\b","gi"), m=>`<mark class="${cls}">${m}</mark>`); };
+  wrap(HEDGES,"h"); wrap(FILLERS,"");
+  marked = marked.replace(/<mark class="">(<mark[^>]*>)/g,"$1").replace(/(<\/mark>)<\/mark>/g,"$1");
+  return {words, wpm, fillers:f, fillerRate:per(f), hedges:h, hedgeRate:per(h), marked};
+}
+
+/* ============================ ANALYSING SCREEN ============================ */
+const STEPS = ["Finding where you were speaking","Measuring your pace","Locating your pauses","Checking how sentences end"];
+async function runAnalysis(blob, dur){
+  $("#steps").innerHTML = STEPS.map((s,i)=>
+    `<div class="stp"><div class="top"><b>${s}</b><span id="pc${i}">0%</span></div><div class="tr"><div class="fl" id="fl${i}"></div></div></div>`).join("");
+  show("s-anz");
+
+  let audio = null, err = null;
+  try{
+    const {pcm, sr} = await decodePCM(blob);
+    audio = analyseAudio(pcm, sr);
+  }catch(e){ err = e; }
+
+  for(let i=0;i<STEPS.length;i++){
+    await new Promise(r=>setTimeout(r,230));
+    $("#fl"+i).style.width = "100%"; $("#pc"+i).textContent = "100%";
+  }
+  await new Promise(r=>setTimeout(r,260));
+
+  if(!audio || audio.silent || err){
+    renderResults(null, analyseText(transcript, dur), dur, err);
+  } else {
+    renderResults(audio, analyseText(transcript, audio.speechSecs || dur), dur, null);
+  }
+}
+
+/* ============================ RESULTS ============================ */
+const MCOL = {pace:"var(--warn)", pauses:"var(--good)", endings:"var(--bad)", fillers:"var(--accent)"};
+const EVCOL = {run:"var(--warn)", pause:"var(--good)", trail:"var(--bad)"};
+const EVMETRIC = {run:"pace", pause:"pauses", trail:"endings"};
+
+function scoreOf(T, A){
+  // Each sub-score 0-100. Shown in full on the page — nothing hidden.
+  const s = [];
+  const clamp = v => Math.max(0, Math.min(100, Math.round(v)));
+  // Text metrics only count when we actually captured words. Otherwise a browser
+  // with no speech-to-text would score a silent perfect 100 on all three.
+  if(T.words >= 5){
+    s.push({k:"Pace", v: clamp(100 - Math.max(0, Math.abs(T.wpm-132)-22)*1.6), note:`${T.wpm} wpm`});
+    s.push({k:"Fillers", v: clamp(100 - T.fillerRate*11), note:`${T.fillerRate}/100 words`});
+    s.push({k:"Hedging", v: clamp(100 - T.hedgeRate*13), note:`${T.hedgeRate}/100 words`});
+  }
+  if(A){
+    const p = A.events.filter(e=>e.type==="pause").length;
+    const t = A.events.filter(e=>e.type==="trail").length;
+    s.push({k:"Pauses", v: clamp(100 - Math.max(0,p-1)*16), note:`${p} long`});
+    s.push({k:"Endings", v: clamp(100 - t*22), note:`${t} trailed off`});
+  }
+  if(!s.length) return {total:null, parts:[]};
+  const total = Math.round(s.reduce((a,x)=>a+x.v,0)/s.length);
+  return {total, parts:s};
+}
+
+const BANDS = [
+  [82,"Controlled. This would land.","var(--good)"],
+  [66,"Solid — one habit is doing the damage.","var(--good)"],
+  [50,"It holds together, with visible seams.","var(--warn)"],
+  [34,"Two clear gaps, both fixable.","var(--warn)"],
+  [0, "Plenty here to work with.","var(--bad)"]
+];
+
+function renderResults(A, T, dur, err){
+  const sc = scoreOf(T, A);
+  const hasText = T.words >= 5;
+  const band = sc.total === null
+    ? ["", "Nothing measurable in that recording.", "var(--ink-3)"]
+    : BANDS.find(b => sc.total >= b[0]);
+  const evs = A ? A.events : [];
+
+  const chips = [];
+  chips.push({id:"pace", k:"Pace", v: hasText ? T.wpm : "—", u: hasText ? "wpm" : "no transcript", pct: hasText ? Math.min(100,T.wpm/180*100) : 0, col:MCOL.pace});
+  if(A){
+    chips.push({id:"pauses", k:"Pauses", v:evs.filter(e=>e.type==="pause").length, u:"long", pct:Math.min(100,evs.filter(e=>e.type==="pause").length*25), col:MCOL.pauses});
+    chips.push({id:"endings", k:"Endings", v:evs.filter(e=>e.type==="trail").length, u:"trailed", pct:Math.min(100,evs.filter(e=>e.type==="trail").length*33), col:MCOL.endings});
+  }
+  chips.push({id:"fillers", k:"Fillers", v: hasText ? T.fillerRate : "—", u: hasText ? "per 100" : "no transcript", pct: hasText ? Math.min(100,T.fillerRate*10) : 0, col:MCOL.fillers});
+
+  const R = 2*Math.PI*44;
+  $("#s-res").innerHTML = `
+  <div class="res">
+    <div class="scorerow">
+      <div class="sring">
+        <svg viewBox="0 0 100 100">
+          <circle class="trk" cx="50" cy="50" r="44"/>
+          <circle class="arc" id="sarc" cx="50" cy="50" r="44" stroke="${band[2]}"
+            style="stroke-dasharray:${R};stroke-dashoffset:${R}"/>
+        </svg>
+        <div class="mid"><div><b>${sc.total===null?"—":sc.total}</b><s>/100</s></div></div>
+      </div>
+      <div class="scoretx">
+        <span class="mono">Your speech score</span>
+        <h1 class="serif">${band[1]}</h1>
+        <p>${hasText
+          ? `${T.words} words over ${A ? A.speechSecs.toFixed(0) : Math.round(dur)} seconds of actual speech.`
+          : `${A ? A.speechSecs.toFixed(0)+" seconds of speech detected." : ""} <b>Your browser didn't provide a transcript</b> — Safari and Firefox can't do speech-to-text — so this report covers delivery only, and pace and fillers are missing. Chrome or Edge gives you the full report.`}
+          Every number below is measured, not estimated — open “How this is calculated” to see exactly how.</p>
+      </div>
+    </div>
+
+    ${err ? '<div class="err">Your browser wouldn\'t let me read the audio, so the pause and ending analysis is missing. The text measurements below are still accurate.</div>' : ""}
+
+    <div class="chips" id="chips">
+      ${chips.map(c=>`<button class="chipm" data-m="${c.id}" style="color:${c.col}">
+        <div class="k">${c.k}</div>
+        <div class="v">${c.v} <u>${c.u}</u></div>
+        <div class="tr"><div class="fl" data-w="${c.pct}"></div></div>
+      </button>`).join("")}
+    </div>
+
+    ${A ? `
+    <div class="player">
+      <h3>Listen to yourself</h3>
+      <p class="ph">${evs.length ? "The marks are the moments worth hearing. Tap one to jump straight to it." : "Nothing was flagged — no long pauses, no trailing sentences."}</p>
+      <div class="pw">
+        <button class="play" id="playbtn" aria-label="Play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+        <div class="wfwrap" id="wfwrap">
+          <canvas class="wf" id="wf"></canvas>
+          <div class="playhead" id="ph"></div>
+        </div>
+      </div>
+      <div class="times"><span>0:00</span><span>${fmt(dur)}</span></div>
+      ${evs.length===0 ? '<p class="nomk">That is a good result and an uncommon one.</p>' : ""}
+    </div>` : ""}
+
+    ${evs.length ? `<div class="moments" id="moments">
+      <span class="mono">${evs.length} moment${evs.length===1?"":"s"} worth hearing</span>
+      ${evs.map((e,i)=>momentCard(e,i)).join("")}
+    </div>` : ""}
+
+    <div class="tscript"><span class="mono">What you said · fillers in red, hedges in amber</span>${T.marked || "<em>No words captured — your browser may not support speech-to-text.</em>"}</div>
+
+    <details class="howto">
+      <summary>How this is calculated</summary>
+      <div class="hb">
+        <p>${sc.total===null
+          ? "<b>No score.</b> Nothing measurable was captured — no transcript and no usable audio."
+          : `<b>Score ${sc.total}</b> is the plain average of these sub-scores: ${sc.parts.map(p=>`${p.k} <code>${p.v}</code> <span style="color:var(--ink-3)">(${p.note})</span>`).join(", ")}.${hasText?"":" Pace, fillers and hedging are excluded because no transcript was captured — scoring them at zero words would have handed you a free full mark."}`}</p>
+        <p><b>Pauses and endings</b> come from the audio itself. Your recording is split into 20&nbsp;ms frames and the loudness of each is measured. Frames above a threshold set from your own recording count as speech. A gap of <code>0.75s</code> or more between them is a pause. A stretch of speech is “trailing off” when its last <code>0.4s</code> is more than <code>55%</code> quieter than the rest of that stretch.</p>
+        <p><b>Pace</b> is your word count divided by the time you were actually speaking, so silences don't drag it down. <b>Fillers and hedging</b> are counted from the transcript against a fixed word list.</p>
+        <p>We deliberately don't score “confidence”. It isn't measurable from a recording, and a number that can't be defended isn't worth having.</p>
+      </div>
+    </details>
+
+    <div class="acts">
+      <button class="btn" id="again">Practise again</button>
+      <a class="btn ghost" href="train.html">Go to the 28 days</a>
+    </div>
+    <p class="disc">Analysed entirely in your browser. The recording is discarded when you leave this page — nothing was uploaded and nothing was stored.</p>
+  </div>`;
+
+  requestAnimationFrame(() => {
+    if(sc.total !== null) $("#sarc").style.strokeDashoffset = R*(1 - sc.total/100);
+    document.querySelectorAll("#chips .fl").forEach(f => f.style.width = f.dataset.w+"%");
+  });
+
+  document.querySelectorAll("#chips .chipm").forEach(b =>
+    b.addEventListener("click", () => selectMetric(b.dataset.m, evs)));
+  document.querySelectorAll(".moment").forEach(m =>
+    m.addEventListener("click", () => jumpTo(+m.dataset.i, evs)));
+  $("#again").addEventListener("click", () => { selMetric=null; selMarker=null; show("s-setup"); });
+
+  show("s-res");
+  // The canvas can only be sized once the section is actually laid out.
+  if(A) requestAnimationFrame(() => setupPlayer(A, evs, dur));
+}
+
+function momentCard(e,i){
+  const col = EVCOL[e.type] || "var(--ink-3)";
+  let title, what, fix;
+  switch(e.type){
+    case "pause":
+      title = "A pause here";
+      what  = `${(e.len||0).toFixed(1)} seconds of silence in the middle of what you were saying.`;
+      fix   = "Not automatically bad — a deliberate pause before an important word reads as composed. Listen, and decide which this one was.";
+      break;
+    case "trail":
+      title = "You trailed off";
+      what  = `The end of this sentence dropped about ${e.drop||0}% in volume.`;
+      fix   = "Sentences that fade out read as uncertainty about what you just said. Land the last four words at the same volume as the first four.";
+      break;
+    case "run":
+      title = `${(e.len||0).toFixed(0)} seconds without a breath`;
+      what  = "You spoke this whole stretch without a break long enough to be heard as one.";
+      fix   = "This is where listeners lose the thread and where fillers breed. Full stops, not conjunctions.";
+      break;
+    default:
+      title = "Something to hear"; what = ""; fix = "";
+  }
+  return `<div class="moment" data-i="${i}">
+    <span class="mnum" style="background:${col}">${i+1}</span>
+    <div class="mbody">
+      <h4>${title} <span>${fmt(e.t)}</span></h4>
+      <p>${what}</p>
+      <p class="fix">${fix}</p>
+    </div>
+  </div>`;
+}
+
+/* ---------- waveform + playback ---------- */
+function drawWave(A, dur){
+  const c = $("#wf"), wrap = $("#wfwrap");
+  const W = Math.max(120, wrap.clientWidth), H = 58, dpr = window.devicePixelRatio || 1;
+  c.width = W*dpr; c.height = H*dpr;
+  const g = c.getContext("2d"); g.scale(dpr,dpr); g.clearRect(0,0,W,H);
+  const bars = Math.max(30, Math.floor(W/3));
+  const per = A.n/bars;
+  const css = getComputedStyle(document.body);
+  const on = css.getPropertyValue("--ink-3").trim() || "#888";
+  const off = css.getPropertyValue("--line").trim() || "#ccc";
+  for(let i=0;i<bars;i++){
+    let m=0, voiced=false;
+    for(let j=Math.floor(i*per); j<Math.floor((i+1)*per) && j<A.n; j++){
+      m = Math.max(m, A.rms[j]);
+      if(A.rms[j] > A.thr) voiced = true;
+    }
+    const h = Math.max(2, Math.min(H-4, (m/A.peak)*(H-6)));
+    g.fillStyle = voiced ? on : off;
+    g.fillRect(i*3, (H-h)/2, 2, h);
+  }
+}
+
+function setupPlayer(A, evs, dur){
+  audioEl = new Audio(blobUrl);
+  drawWave(A, dur);
+  const wrap = $("#wfwrap");
+  evs.forEach((e,i) => {
+    const d = document.createElement("div");
+    d.className = "mk"; d.dataset.i = i;
+    d.style.left = (e.mid/dur*100) + "%";
+    d.style.background = EVCOL[e.type];
+    d.textContent = i+1;
+    d.title = fmt(e.t);
+    d.addEventListener("click", ev => { ev.stopPropagation(); jumpTo(i, evs); });
+    wrap.appendChild(d);
+  });
+  $("#wf").addEventListener("click", ev => {
+    const r = $("#wf").getBoundingClientRect();
+    audioEl.currentTime = Math.max(0, (ev.clientX-r.left)/r.width*dur);
+    audioEl.play();
+  });
+  $("#playbtn").addEventListener("click", () => audioEl.paused ? audioEl.play() : audioEl.pause());
+  audioEl.addEventListener("timeupdate", () => {
+    const p = $("#ph"); if(!p) return;
+    p.style.display = "block";
+    p.style.left = (audioEl.currentTime/dur*100)+"%";
+  });
+  audioEl.addEventListener("ended", () => { const p=$("#ph"); if(p) p.style.display="none"; });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt=setTimeout(()=>drawWave(A,dur),180); });
+}
+
+function jumpTo(i, evs){
+  selMarker = i;
+  document.querySelectorAll(".mk").forEach(m => m.classList.toggle("sel", +m.dataset.i===i));
+  document.querySelectorAll(".moment").forEach(m => m.classList.toggle("sel", +m.dataset.i===i));
+  if(audioEl){
+    audioEl.currentTime = Math.max(0, evs[i].t - 1.2);
+    audioEl.play();
+  }
+  const card = document.querySelector(`.moment[data-i="${i}"]`);
+  if(card) card.scrollIntoView({block:"nearest", behavior:"smooth"});
+}
+
+function selectMetric(m, evs){
+  selMetric = (selMetric === m) ? null : m;
+  document.querySelectorAll("#chips .chipm").forEach(b => b.classList.toggle("on", b.dataset.m === selMetric));
+  document.querySelectorAll(".mk").forEach(mk => {
+    const e = evs[+mk.dataset.i];
+    const match = !selMetric || EVMETRIC[e.type] === selMetric;
+    mk.style.opacity = match ? "1" : ".2";
+  });
+  document.querySelectorAll(".moment").forEach(c => {
+    const e = evs[+c.dataset.i];
+    c.style.display = (!selMetric || EVMETRIC[e.type] === selMetric) ? "" : "none";
+  });
+}
+</script>
+</body>
+</html>
