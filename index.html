@@ -41,8 +41,9 @@
 @media(max-width:560px){ .spec-row{padding:18px 18px} }
 
 /* tools */
-.tools{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:clamp(46px,8vw,76px)}
-@media(max-width:760px){ .tools{grid-template-columns:1fr} }
+.tools{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:clamp(46px,8vw,76px)}
+@media(max-width:900px){ .tools{grid-template-columns:1fr} }
+.tool h2{font-size:1.6rem}
 .tool{
   display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line);
   border-radius:16px; padding:28px 28px 26px; text-decoration:none; color:inherit;
@@ -83,6 +84,7 @@
   <div class="bar-sp"></div>
   <nav class="bar-nav">
     <a href="./" aria-current="page">Home</a>
+    <a href="report.html">Speech report</a>
     <a href="check.html">Assessment</a>
     <a href="train.html">28 days</a>
     <a href="blog.html">Reading</a>
@@ -96,7 +98,7 @@
     <p class="lede">Everything else works fine. This finds which two, and then makes you practise them out loud for twenty-eight days — measuring what actually comes out of your mouth rather than asking how you felt it went.</p>
     <div class="acts">
       <a class="btn" href="check.html">Take the assessment</a>
-      <a class="btn ghost" href="train.html">Skip to Day 1</a>
+      <a class="btn ghost" href="report.html">Or just record 45 seconds</a>
     </div>
   </section>
 
@@ -114,6 +116,13 @@
   </section>
 
   <section class="tools">
+    <a class="tool" href="report.html">
+      <span class="step">Two minutes</span>
+      <h2>The speech report</h2>
+      <p>Pick what you're practising, get a scenario, talk for forty-five seconds. Your pauses and trailing sentences get marked on your own waveform — tap one and hear the exact moment.</p>
+      <div class="meta"><span class="chip social">Records you</span><span class="chip work">Do it any time</span></div>
+      <span class="go">Try it now →</span>
+    </a>
     <a class="tool" href="check.html">
       <span class="step">Start here</span>
       <h2>The assessment</h2>
@@ -170,6 +179,7 @@
 <footer class="foot"><div class="foot-in">
   <div class="links">
     <a href="./">Home</a>
+    <a href="report.html">Speech report</a>
     <a href="check.html">Assessment</a>
     <a href="train.html">28 days</a>
     <a href="blog.html">Reading</a>
