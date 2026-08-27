@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Assessment — The Practice Room</title>
+<meta name="description" content="Twenty questions that score five communication traits and build a four-week plan around your two weakest.">
+<meta name="theme-color" content="#0C6E75">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/base.css">
+<style>
+.meter{display:flex; gap:2.5px; flex:1; min-width:60px}
+.seg{flex:1; height:9px; background:var(--surface-2); border-radius:1px; transition:background .3s ease}
+.seg.on{background:var(--accent)}
+.seg.cur{background:var(--accent); animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+.screen{display:none; animation:rise .38s cubic-bezier(.2,.7,.3,1) both}
+.screen.live{display:block}
+@keyframes rise{from{opacity:0; transform:translateY(10px)}to{opacity:1; transform:none}}
+
+.eyebrow{color:var(--accent); display:block; margin-bottom:14px}
+
+/* intro */
+.hero{padding:clamp(40px,7vw,64px) 0 0}
+.hero h1{font-family:var(--serif); font-size:clamp(2.2rem,7vw,3.4rem); line-height:1.02; max-width:16ch}
+.hero .lede{font-size:1.09rem; color:var(--ink-2); margin-top:22px; max-width:54ch}
+.traitlist{list-style:none; padding:0; margin:34px 0 0; border-top:1px solid var(--line)}
+.traitlist li{display:grid; grid-template-columns:104px 1fr; gap:16px; align-items:baseline; padding:14px 2px; border-bottom:1px solid var(--line)}
+.traitlist .k{font-family:var(--mono); font-size:.66rem; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--accent)}
+.traitlist .v{color:var(--ink-2); font-size:.95rem}
+@media(max-width:520px){ .traitlist li{grid-template-columns:1fr; gap:4px} }
+.note{margin-top:28px; font-size:.92rem; color:var(--ink-2)}
+.acts{display:flex; gap:10px; flex-wrap:wrap; margin-top:26px}
+
+/* question */
+.qwrap{padding:clamp(34px,6vw,54px) 0 0}
+.qnum{color:var(--ink-3); display:block; margin-bottom:12px}
+.qwrap h2{font-family:var(--serif); font-size:clamp(1.6rem,5vw,2.3rem); line-height:1.14; max-width:22ch}
+.opts{display:flex; flex-direction:column; gap:9px; margin-top:28px; max-width:640px}
+.opt{
+  display:flex; align-items:flex-start; gap:13px; width:100%; text-align:left;
+  background:var(--surface); border:1px solid var(--line); border-radius:11px;
+  padding:15px 17px; font-size:1rem; line-height:1.45;
+  transition:border-color .15s, transform .12s, box-shadow .15s;
+}
+.opt:hover{border-color:var(--accent); transform:translateX(3px)}
+.opt.picked{border-color:var(--accent); background:var(--accent-soft); box-shadow:var(--shadow)}
+.dot{flex:none; width:18px; height:18px; border-radius:50%; border:1.5px solid var(--line); margin-top:3px; position:relative; transition:border-color .15s}
+.opt:hover .dot,.opt.picked .dot{border-color:var(--accent)}
+.opt.picked .dot::after{content:""; position:absolute; inset:3px; border-radius:50%; background:var(--accent)}
+.back{margin-top:24px; font-family:var(--mono); font-size:.7rem; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); padding:6px 0}
+.back:hover{color:var(--accent)}
+
+/* interstitial */
+.beat{padding:clamp(50px,10vw,90px) 0 0; max-width:620px}
+.beat .big{font-family:var(--serif); font-size:clamp(2rem,6vw,2.9rem); line-height:1.06}
+.beat p{color:var(--ink-2); font-size:1.05rem; margin-top:16px}
+
+/* results */
+.res-head{padding:clamp(36px,6vw,56px) 0 0}
+.res-head h1{font-size:clamp(2rem,6vw,3rem); line-height:1.05; margin:12px 0 14px; max-width:19ch}
+.res-head p{color:var(--ink-2); max-width:56ch}
+.scorecard{margin-top:30px; padding:6px 22px 12px}
+.row{padding:16px 0; border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:none}
+.row-top{display:flex; align-items:baseline; justify-content:space-between; gap:12px}
+.row-name{font-weight:600; font-size:1rem; display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.row-val{font-family:var(--mono); font-size:.82rem; font-weight:600; font-variant-numeric:tabular-nums; color:var(--ink-3)}
+.bar2{height:7px; background:var(--surface-2); border-radius:99px; margin-top:10px; overflow:hidden}
+.fill{height:100%; border-radius:99px; width:0; transition:width .9s cubic-bezier(.2,.8,.3,1)}
+.fill.good{background:var(--good)} .fill.warn{background:var(--warn)} .fill.bad{background:var(--bad)}
+.row-note{font-size:.87rem; color:var(--ink-3); margin-top:9px}
+
+.sec{margin-top:clamp(40px,7vw,60px)}
+.sec > h2{font-size:clamp(1.5rem,4vw,2rem); line-height:1.1}
+.sec > .sub{color:var(--ink-3); font-size:.94rem; margin:6px 0 20px}
+.drill{margin-bottom:11px}
+.drill .for{font-family:var(--mono); font-size:.62rem; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); display:block; margin-bottom:9px}
+.drill h3{font-family:var(--serif); font-size:1.35rem; margin-bottom:8px}
+.drill p{font-size:.95rem; color:var(--ink-2)}
+.drill .why{margin-top:10px; font-size:.87rem; color:var(--ink-3); font-style:italic}
+
+.week{display:grid; grid-template-columns:auto 1fr; gap:0 20px}
+.week-n{font-family:var(--mono); font-size:.7rem; font-weight:600; color:var(--accent); padding-top:19px; position:relative; white-space:nowrap}
+.week-n::after{content:""; position:absolute; left:22px; top:38px; bottom:-4px; width:1px; background:var(--line)}
+.week > div:nth-last-child(2)::after{display:none}
+.week-b{padding:16px 0; border-bottom:1px solid var(--line)}
+.week-b:last-child{border-bottom:none}
+.week-b h4{font-weight:600; font-size:1rem; margin-bottom:5px}
+.week-b p{font-size:.93rem; color:var(--ink-2)}
+@media(max-width:520px){ .week{grid-template-columns:1fr; gap:0} .week-n{padding-top:16px} .week-n::after{display:none} .week-b{padding-top:4px} }
+
+.disc{font-size:.85rem; color:var(--ink-3); margin-top:36px; padding-top:20px; border-top:1px solid var(--line)}
+@media print{ .bar,.foot,.next{display:none} .card{break-inside:avoid} }
+</style>
+</head>
+<body>
+
+<header class="bar"><div class="bar-in">
+  <a class="mark" href="./">The <em>Practice</em> Room</a>
+  <div class="meter" id="meter" role="progressbar" aria-label="Assessment progress"></div>
+  <span class="bar-note" id="count">0 / 20</span>
+</div></header>
+
+<main class="page narrow">
+
+  <section class="screen live" id="s-intro">
+    <div class="hero">
+      <span class="mono eyebrow">20 questions · about 5 minutes</span>
+      <h1>The gap between what you mean and what comes out.</h1>
+      <p class="lede">Most people who feel bad at talking aren't bad at all of it. They're weak in one or two specific places and fine everywhere else. This finds which ones, then gives you drills for those and only those.</p>
+
+      <ul class="traitlist">
+        <li><span class="k">Clarity</span><span class="v">Turning a thought into a finished sentence, on demand</span></li>
+        <li><span class="k">Presence</span><span class="v">What your voice and body do while you're speaking</span></li>
+        <li><span class="k">Initiation</span><span class="v">Opening a conversation nobody handed to you</span></li>
+        <li><span class="k">Flow</span><span class="v">Keeping it alive past the first exchange</span></li>
+        <li><span class="k">Recovery</span><span class="v">What happens after something lands badly</span></li>
+      </ul>
+
+      <p class="note"><strong>Answer as you actually are, not as you'd like to be.</strong> Nothing is sent anywhere — it runs in your browser, and your answers stay on this device.</p>
+
+      <div class="acts">
+        <button class="btn" id="begin">Start the assessment</button>
+        <button class="btn ghost" id="resume" style="display:none">Resume where I left off</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen" id="s-q">
+    <div class="qwrap">
+      <span class="mono qnum" id="qnum"></span>
+      <h2 id="qtext"></h2>
+      <div class="opts" id="opts"></div>
+      <button class="back" id="back">← Previous</button>
+    </div>
+  </section>
+
+  <section class="screen" id="s-beat">
+    <div class="beat">
+      <span class="mono eyebrow" id="beat-eyebrow"></span>
+      <div class="big" id="beat-big"></div>
+      <p id="beat-body"></p>
+      <div class="acts"><button class="btn" id="beat-next">Keep going</button></div>
+    </div>
+  </section>
+
+  <section class="screen" id="s-res"></section>
+</main>
+
+<footer class="foot"><div class="foot-in">
+  <div class="links">
+    <a href="./">Home</a><a href="check.html">Assessment</a><a href="train.html">28 days</a>
+  </div>
+  <div class="bar-sp"></div>
+  <p>Runs entirely in your browser. Nothing is uploaded; your answers stay on this device.</p>
+</div></footer>
+
+<script src="assets/check.js"></script>
+</body>
+</html>
