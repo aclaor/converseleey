@@ -37,6 +37,22 @@
 .err{background:var(--bad-bg);color:var(--bad);border-radius:11px;padding:13px 16px;font-size:.9rem;margin-top:14px;word-break:break-word}
 .ok{background:var(--good-bg);color:var(--good);border-radius:11px;padding:13px 16px;font-size:.9rem;margin-top:14px}
 
+.provs{display:flex;flex-direction:column;gap:9px}
+.prov{display:flex;gap:12px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);
+  border-radius:12px;padding:15px 17px;text-align:left;width:100%;transition:border-color .15s,background .15s}
+.prov:hover{border-color:var(--accent)}
+.prov.on{border-color:var(--accent);background:var(--accent-soft)}
+.prov .rad{flex:none;width:17px;height:17px;border-radius:50%;border:1.5px solid var(--line);position:relative;margin-top:2px}
+.prov.on .rad{border-color:var(--accent)}
+.prov.on .rad::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--accent)}
+.prov .pv{flex:1;min-width:0}
+.prov b{font-weight:600;font-size:.98rem;margin-right:8px}
+.prov .tag{font-family:var(--mono);font-size:.58rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  padding:3px 8px;border-radius:99px;white-space:nowrap}
+.prov .tag.f{background:var(--good-bg);color:var(--good)}
+.prov .tag.c{background:var(--warn-bg);color:var(--warn)}
+.prov small{display:block;color:var(--ink-3);font-size:.86rem;margin-top:6px;line-height:1.5}
+
 /* scenario picker */
 .grp{margin-top:28px}
 .grp > .mono{color:var(--ink-3);display:block;margin-bottom:10px}
@@ -116,22 +132,29 @@
     <span class="mono">Roleplay · unlimited · your key</span>
     <h1>Have the conversation before you have to.</h1>
     <p>An AI character plays the other person — the interviewer, the manager, the date — and stays in role. It won't coach you mid-scene, because nobody does that in real life. When you end it, it breaks character and tells you what you actually did.</p>
-    <p>This runs directly from your browser to Anthropic using <b>your own API key</b>. That means it's genuinely unlimited: no daily cap, no trial, no upgrade prompt. It also means the cost is yours, and it's small — a full scene plus coaching is typically well under a cent.</p>
+    <p>It runs straight from your browser to whichever provider you pick, using <b>your own key</b>. Three of the four have a genuinely free tier, so this can cost you nothing.</p>
+
+    <div class="grp"><span class="mono">Choose a provider</span><div id="provs" class="provs"></div></div>
 
     <div class="keybox">
-      <label for="key">Your Anthropic API key</label>
-      <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+      <label for="key" id="keylabel">Your API key</label>
+      <input id="key" type="password" placeholder="..." autocomplete="off" spellcheck="false">
       <div class="keyrow">
-        <button class="btn" id="savekey">Save and continue</button>
-        <a class="btn ghost" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key</a>
+        <button class="btn" id="savekey">Connect</button>
+        <a class="btn ghost" id="getkey" href="#" target="_blank" rel="noopener">Get a key</a>
       </div>
       <div id="keymsg"></div>
-      <p class="keynote"><b>The key is stored only in this browser</b>, in local storage on this device. It is never sent anywhere except directly to Anthropic's API. There is no server behind this page — nobody, including whoever made this site, can see it.</p>
+      <p class="keynote"><b>The key is stored only in this browser</b>, on this device. It goes nowhere except directly to the provider you chose. There is no server behind this page — nobody, including whoever built this site, can see it.</p>
+    </div>
+
+    <div class="warn">
+      <b>If a provider refuses</b>
+      Calling these APIs straight from a web page only works if the provider allows it. Some do, some don't, and none of them promise either way in writing. If one is blocked you'll get a clear message saying so — just pick another from the list. It takes about thirty seconds to find one that works.
     </div>
 
     <div class="warn">
       <b>Sensible precautions</b>
-      Create a <strong>separate key just for this</strong> rather than reusing one from another project, and set a spend limit on it in the Anthropic console. Don't paste a key into any page on a shared or public computer. You can delete the key from this browser at any time with the button that appears once it's saved.
+      Make a <strong>separate key just for this</strong> rather than reusing one from another project, and don't paste a key into any page on a shared or public computer. You can delete it from this browser at any time with the button on the next screen.
     </div>
   </div>
 </section>
@@ -189,9 +212,6 @@
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
-const KEYSTORE = "practiceroom.anthropickey";
-const API = "https://api.anthropic.com/v1";
-let apiKey = null, model = null;
 let scene = null, history = [], ended = false;
 let tokIn = 0, tokOut = 0;
 
@@ -251,54 +271,236 @@ const SCENES = [
  role:"You are Morgan, likeable and a bit relentless, who really needs this off your plate. Ask nicely. If they hedge or apologise a lot, read it as a maybe and push a little harder — reframe, offer to help, suggest it's small. If they say no clearly and hold it, accept it gracefully and respect them for it."}
 ];
 
-/* ======================= KEY ======================= */
-function loadKey(){ try{ return localStorage.getItem(KEYSTORE); }catch(e){ return null; } }
-function saveKey(k){ try{ localStorage.setItem(KEYSTORE,k); }catch(e){} }
+/* ======================= PROVIDERS ======================= */
+/* Four back ends. Groq and OpenRouter are OpenAI-shaped and share a code path;
+   Anthropic and Gemini each have their own. Every one is called straight from
+   this browser, so whether it works at all depends on that provider allowing
+   cross-origin requests. The connection test below reports exactly that. */
+
+const PROVIDERS = {
+  groq: {
+    name: "Groq",
+    free: "Free tier, no card required",
+    detail: "Fast and genuinely free. Limits vary by model — roughly 30 requests a minute and thousands a day, which is far more than you'll use.",
+    keyUrl: "https://console.groq.com/keys",
+    keyHint: "gsk_...",
+    shape: "openai",
+    base: "https://api.groq.com/openai/v1",
+    prefer: [/llama-3\.3.*70b/i, /llama.*70b/i, /llama-3\.1/i, /llama/i, /mixtral/i]
+  },
+  openrouter: {
+    name: "OpenRouter",
+    free: "Free models, no card required",
+    detail: "Routes to many models. Free models are capped at about 50 requests a day without credit on the account — enough for a few scenes, not a whole evening.",
+    keyUrl: "https://openrouter.ai/keys",
+    keyHint: "sk-or-...",
+    shape: "openai",
+    base: "https://openrouter.ai/api/v1",
+    freeOnly: true,
+    prefer: [/llama.*70b.*:free/i, /:free/i]
+  },
+  gemini: {
+    name: "Google Gemini",
+    free: "Free tier, no card required",
+    detail: "Google's free tier is generous for personal use. Limits are shown on your AI Studio dashboard and change from time to time.",
+    keyUrl: "https://aistudio.google.com/apikey",
+    keyHint: "AIza...",
+    shape: "gemini",
+    base: "https://generativelanguage.googleapis.com/v1beta",
+    prefer: [/gemini.*flash/i, /gemini/i]
+  },
+  anthropic: {
+    name: "Anthropic",
+    free: "Paid — prepaid credit",
+    detail: "Not free: the API bills separately from a Claude subscription and needs prepaid credit. Typically the best at staying in character, and a scene costs a fraction of a cent.",
+    keyUrl: "https://console.anthropic.com/settings/keys",
+    keyHint: "sk-ant-...",
+    shape: "anthropic",
+    base: "https://api.anthropic.com/v1",
+    prefer: [/sonnet/i, /opus/i, /haiku/i]
+  }
+};
+
+let provider = "groq";
+let apiKey = null, model = null;
+
+const headersFor = (p, k) => p.shape === "anthropic"
+  ? {"x-api-key":k, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true", "content-type":"application/json"}
+  : p.shape === "gemini"
+  ? {"content-type":"application/json"}
+  : {"Authorization":"Bearer "+k, "content-type":"application/json"};
+
+/* Turn any failure into something a person can act on. */
+function explain(e, p){
+  const msg = String(e && e.message || e);
+  if(e instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(msg))
+    return {kind:"cors", text:`<b>${p.name} wouldn't accept a request from a browser.</b> That's a CORS restriction on their end, not a problem with your key — this page has no server to route around it. Try a different provider above; they don't all behave the same way.`};
+  if(/\b401\b|\b403\b|invalid.*key|unauthor|API key not valid|permission/i.test(msg))
+    return {kind:"auth", text:`<b>That key was rejected.</b> ${msg}<br><br>Check you copied the whole thing, and that it's a ${p.name} key rather than one from another provider.`};
+  if(/\b429\b|rate.?limit|quota|exhaust/i.test(msg))
+    return {kind:"rate", text:`<b>Rate limited.</b> ${msg}<br><br>That's the free tier doing its job. Wait a minute, or switch provider.`};
+  if(/credit|balance|billing|insufficient/i.test(msg))
+    return {kind:"credit", text:`<b>No credit on that account.</b> ${msg}`};
+  return {kind:"other", text:`<b>That didn't work.</b> ${msg}`};
+}
+
+async function listModels(pid, k){
+  const p = PROVIDERS[pid];
+  let url, opts = {headers: headersFor(p,k)};
+  if(p.shape === "gemini") url = `${p.base}/models?key=${encodeURIComponent(k)}&pageSize=200`;
+  else url = `${p.base}/models`;
+  const r = await fetch(url, opts);
+  if(!r.ok){
+    let m = `HTTP ${r.status}`;
+    try{ const j = await r.json(); m = (j.error && (j.error.message||j.error)) || j.message || m; }catch(e){}
+    throw new Error(typeof m === "string" ? m : JSON.stringify(m));
+  }
+  const j = await r.json();
+  let ids;
+  if(p.shape === "gemini")
+    ids = (j.models||[]).filter(m => (m.supportedGenerationMethods||[]).includes("generateContent"))
+                        .map(m => m.name.replace(/^models\//,""));
+  else ids = (j.data||[]).map(m => m.id);
+  if(p.freeOnly){
+    const f = ids.filter(id => /:free$/i.test(id));
+    if(f.length) ids = f;
+  }
+  if(!ids.length) throw new Error("This key can't see any usable models.");
+  for(const rx of p.prefer){ const hit = ids.find(id => rx.test(id)); if(hit) return hit; }
+  return ids[0];
+}
+
+/* One streaming call, whichever provider. onText gets the full text so far. */
+async function stream(system, messages, onText, maxTokens){
+  const p = PROVIDERS[provider];
+  const max = maxTokens || 600;
+  let url, body;
+
+  if(p.shape === "anthropic"){
+    url = `${p.base}/messages`;
+    body = {model, max_tokens:max, system, messages, stream:true};
+  } else if(p.shape === "gemini"){
+    url = `${p.base}/models/${model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
+    body = {
+      system_instruction:{parts:[{text:system}]},
+      contents: messages.map(m => ({role: m.role === "assistant" ? "model" : "user", parts:[{text:m.content}]})),
+      generationConfig:{maxOutputTokens:max}
+    };
+  } else {
+    url = `${p.base}/chat/completions`;
+    body = {model, stream:true, max_tokens:max,
+            messages:[{role:"system", content:system}].concat(messages),
+            stream_options:{include_usage:true}};
+  }
+
+  const r = await fetch(url, {method:"POST", headers: headersFor(p, apiKey), body: JSON.stringify(body)});
+  if(!r.ok){
+    let m = `HTTP ${r.status}`;
+    try{ const j = await r.json(); m = (j.error && (j.error.message||j.error)) || j.message || m; }catch(e){}
+    throw new Error(typeof m === "string" ? m : JSON.stringify(m));
+  }
+
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = "", full = "";
+  for(;;){
+    const {done, value} = await reader.read();
+    if(done) break;
+    buf += dec.decode(value, {stream:true});
+    const lines = buf.split("\n"); buf = lines.pop();
+    for(const line of lines){
+      if(!line.startsWith("data:")) continue;
+      const raw = line.slice(5).trim();
+      if(!raw || raw === "[DONE]") continue;
+      let ev; try{ ev = JSON.parse(raw); }catch(e){ continue; }
+
+      if(p.shape === "anthropic"){
+        if(ev.type === "content_block_delta" && ev.delta && ev.delta.text){ full += ev.delta.text; onText(full); }
+        if(ev.type === "message_start" && ev.message && ev.message.usage) tokIn += ev.message.usage.input_tokens||0;
+        if(ev.type === "message_delta" && ev.usage) tokOut += ev.usage.output_tokens||0;
+      } else if(p.shape === "gemini"){
+        const c = ev.candidates && ev.candidates[0];
+        const t = c && c.content && c.content.parts && c.content.parts.map(x=>x.text||"").join("");
+        if(t){ full += t; onText(full); }
+        if(ev.usageMetadata){
+          tokIn = Math.max(tokIn, ev.usageMetadata.promptTokenCount||0);
+          tokOut = Math.max(tokOut, ev.usageMetadata.candidatesTokenCount||0);
+        }
+      } else {
+        const d = ev.choices && ev.choices[0] && ev.choices[0].delta;
+        if(d && d.content){ full += d.content; onText(full); }
+        const u = ev.usage || (ev.x_groq && ev.x_groq.usage);
+        if(u){ tokIn += u.prompt_tokens||0; tokOut += u.completion_tokens||0; }
+      }
+    }
+  }
+  paintUsage();
+  return full;
+}
+
+function paintUsage(){
+  const t = `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out`;
+  const a = $("#useScene"), b = $("#usePick");
+  if(a) a.textContent = tokIn||tokOut ? t : "";
+  if(b) b.textContent = tokIn||tokOut ? "This session: " + t : "";
+}
+
+/* ======================= KEY SCREEN ======================= */
+const KEYSTORE = "practiceroom.llm";
+function loadSaved(){ try{ return JSON.parse(localStorage.getItem(KEYSTORE)||"null"); }catch(e){ return null; } }
+function saveCreds(pid,k){ try{ localStorage.setItem(KEYSTORE, JSON.stringify({p:pid,k})); }catch(e){} }
 function dropKey(){ try{ localStorage.removeItem(KEYSTORE); }catch(e){} }
 
-const HEADERS = k => ({
-  "x-api-key": k,
-  "anthropic-version": "2023-06-01",
-  "anthropic-dangerous-direct-browser-access": "true",
-  "content-type": "application/json"
-});
-
-async function pickModel(k){
-  const r = await fetch(`${API}/models?limit=100`, {headers: HEADERS(k)});
-  if(!r.ok){
-    let m = `${r.status}`;
-    try{ const j = await r.json(); m = (j.error && j.error.message) || m; }catch(e){}
-    throw new Error(m);
-  }
-  const ids = (await r.json()).data.map(m => m.id);
-  for(const want of [/sonnet/i, /opus/i, /haiku/i]){
-    const hit = ids.find(id => want.test(id));
-    if(hit) return hit;
-  }
-  if(!ids.length) throw new Error("This key has no models available to it.");
-  return ids[0];
+function renderProviders(){
+  $("#provs").innerHTML = Object.entries(PROVIDERS).map(([id,p]) => `
+    <button class="prov${id===provider?" on":""}" data-p="${id}">
+      <span class="rad"></span>
+      <span class="pv">
+        <b>${p.name}</b>
+        <span class="tag ${/^Free/.test(p.free)?"f":"c"}">${p.free}</span>
+        <small>${p.detail}</small>
+      </span>
+    </button>`).join("");
+  $("#provs").querySelectorAll(".prov").forEach(b => b.addEventListener("click", () => {
+    provider = b.dataset.p;
+    $("#provs").querySelectorAll(".prov").forEach(x=>x.classList.remove("on"));
+    b.classList.add("on");
+    syncKeyUI();
+  }));
+  syncKeyUI();
+}
+function syncKeyUI(){
+  const p = PROVIDERS[provider];
+  $("#key").placeholder = p.keyHint;
+  $("#keylabel").textContent = `Your ${p.name} API key`;
+  $("#getkey").href = p.keyUrl;
+  $("#getkey").textContent = `Get a ${p.name} key`;
+  $("#keymsg").innerHTML = "";
 }
 
 $("#savekey").addEventListener("click", async () => {
   const k = $("#key").value.trim();
+  const p = PROVIDERS[provider];
   $("#keymsg").innerHTML = "";
   if(!k){ $("#keymsg").innerHTML = '<div class="err">Paste a key first.</div>'; return; }
-  $("#savekey").classList.add("off"); $("#savekey").textContent = "Checking…";
+  $("#savekey").classList.add("off"); $("#savekey").textContent = "Testing…";
   try{
-    model = await pickModel(k);
-    apiKey = k; saveKey(k);
-    $("#keymsg").innerHTML = `<div class="ok">Key works. Using <b>${model}</b>.</div>`;
-    setTimeout(() => { renderPicker(); show("s-pick"); }, 700);
+    model = await listModels(provider, k);
+    apiKey = k; saveCreds(provider, k);
+    $("#keymsg").innerHTML = `<div class="ok">Connected to <b>${p.name}</b>. Using <b>${model}</b>.</div>`;
+    setTimeout(() => { renderPicker(); show("s-pick"); }, 750);
   }catch(e){
-    $("#keymsg").innerHTML = `<div class="err"><b>That key didn't work.</b><br>${String(e.message||e)}<br><br>Check you copied the whole thing, and that the key has credit on it.</div>`;
+    const x = explain(e, p);
+    $("#keymsg").innerHTML = `<div class="err">${x.text}</div>`;
   }
-  $("#savekey").classList.remove("off"); $("#savekey").textContent = "Save and continue";
+  $("#savekey").classList.remove("off"); $("#savekey").textContent = "Connect";
 });
 $("#key").addEventListener("keydown", e => { if(e.key === "Enter") $("#savekey").click(); });
 
 $("#forget").addEventListener("click", () => {
   dropKey(); apiKey = null; model = null;
-  $("#key").value = ""; $("#keymsg").innerHTML = '<div class="ok">Key removed from this browser.</div>';
+  $("#key").value = "";
+  renderProviders();
+  $("#keymsg").innerHTML = '<div class="ok">Key removed from this browser.</div>';
   show("s-key");
 });
 
@@ -315,47 +517,6 @@ function renderPicker(){
   $("#scnGroups").querySelectorAll(".sc").forEach(b =>
     b.addEventListener("click", () => openScene(SCENES[+b.dataset.i])));
   paintUsage();
-}
-
-/* ======================= API ======================= */
-async function stream(system, messages, onText, maxTokens){
-  const r = await fetch(`${API}/messages`, {
-    method:"POST", headers: HEADERS(apiKey),
-    body: JSON.stringify({model, max_tokens: maxTokens||600, system, messages, stream:true})
-  });
-  if(!r.ok){
-    let m = `HTTP ${r.status}`;
-    try{ const j = await r.json(); m = (j.error && j.error.message) || m; }catch(e){}
-    throw new Error(m);
-  }
-  const reader = r.body.getReader(), dec = new TextDecoder();
-  let buf = "", full = "";
-  for(;;){
-    const {done, value} = await reader.read();
-    if(done) break;
-    buf += dec.decode(value, {stream:true});
-    const lines = buf.split("\n"); buf = lines.pop();
-    for(const line of lines){
-      if(!line.startsWith("data:")) continue;
-      const raw = line.slice(5).trim();
-      if(!raw || raw === "[DONE]") continue;
-      let ev; try{ ev = JSON.parse(raw); }catch(e){ continue; }
-      if(ev.type === "content_block_delta" && ev.delta && ev.delta.text){
-        full += ev.delta.text; onText(full);
-      }
-      if(ev.type === "message_start" && ev.message && ev.message.usage) tokIn += ev.message.usage.input_tokens || 0;
-      if(ev.type === "message_delta" && ev.usage) tokOut += ev.usage.output_tokens || 0;
-    }
-  }
-  paintUsage();
-  return full;
-}
-
-function paintUsage(){
-  const t = `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out`;
-  const a = $("#useScene"), b = $("#usePick");
-  if(a) a.textContent = tokIn ? t : "";
-  if(b) b.textContent = tokIn ? "This session: " + t : "";
 }
 
 /* ======================= SCENE ======================= */
@@ -558,16 +719,18 @@ $("#ta").addEventListener("keydown", e => {
 });
 
 /* ======================= BOOT ======================= */
+renderProviders();
 (async function(){
-  const k = loadKey();
-  if(!k) return;
-  apiKey = k;
-  $("#key").value = "";
+  const saved = loadSaved();
+  if(!saved || !saved.k || !PROVIDERS[saved.p]) return;
+  provider = saved.p; apiKey = saved.k;
+  renderProviders();
   try{
-    model = await pickModel(k);
+    model = await listModels(provider, apiKey);
     renderPicker(); show("s-pick");
   }catch(e){
-    $("#keymsg").innerHTML = `<div class="err"><b>Your saved key stopped working.</b><br>${String(e.message||e)}</div>`;
+    const x = explain(e, PROVIDERS[provider]);
+    $("#keymsg").innerHTML = `<div class="err"><b>Your saved key stopped working.</b><br>${x.text}</div>`;
   }
 })();
 </script>
