@@ -41,9 +41,9 @@
 @media(max-width:560px){ .spec-row{padding:18px 18px} }
 
 /* tools */
-.tools{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:clamp(46px,8vw,76px)}
-@media(max-width:900px){ .tools{grid-template-columns:1fr} }
-.tool h2{font-size:1.6rem}
+.tools{display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-top:clamp(46px,8vw,76px)}
+@media(max-width:760px){ .tools{grid-template-columns:1fr} }
+.tool h2{font-size:1.65rem}
 .tool{
   display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line);
   border-radius:16px; padding:28px 28px 26px; text-decoration:none; color:inherit;
@@ -84,6 +84,7 @@
   <div class="bar-sp"></div>
   <nav class="bar-nav">
     <a href="./" aria-current="page">Home</a>
+    <a href="roleplay.html">Roleplay</a>
     <a href="report.html">Speech report</a>
     <a href="check.html">Assessment</a>
     <a href="train.html">28 days</a>
@@ -116,6 +117,13 @@
   </section>
 
   <section class="tools">
+    <a class="tool" href="roleplay.html">
+      <span class="step">Bring your own key</span>
+      <h2>The roleplay</h2>
+      <p>Rehearse the actual conversation. An AI character plays your manager, the interviewer, the date — stays in role, pushes back, and won't coach you mid-scene. When you end it, it breaks character and quotes what you said.</p>
+      <div class="meta"><span class="chip work">Unlimited</span><span class="chip social">Needs your own API key</span></div>
+      <span class="go">Start a scene →</span>
+    </a>
     <a class="tool" href="report.html">
       <span class="step">Two minutes</span>
       <h2>The speech report</h2>
@@ -179,6 +187,7 @@
 <footer class="foot"><div class="foot-in">
   <div class="links">
     <a href="./">Home</a>
+    <a href="roleplay.html">Roleplay</a>
     <a href="report.html">Speech report</a>
     <a href="check.html">Assessment</a>
     <a href="train.html">28 days</a>
