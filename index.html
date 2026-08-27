@@ -1,1 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Practice Room</title>
+<meta name="description" content="Find the two things making you hard to listen to, then drill them for 28 days. A free communication trainer that measures how you actually speak.">
+<meta name="theme-color" content="#0C6E75">
+<meta property="og:title" content="The Practice Room">
+<meta property="og:description" content="Find the two things making you hard to listen to, then drill them for 28 days.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/base.css">
+<style>
+.hero{padding:clamp(48px,9vw,92px) 0 0}
+.hero .kicker{color:var(--accent); display:block; margin-bottom:20px}
+.hero h1{
+  font-family:var(--serif); font-size:clamp(2.5rem,8vw,4.6rem); line-height:.98;
+  letter-spacing:-.015em; max-width:15ch;
+}
+.hero h1 em{font-style:italic; color:var(--accent)}
+.hero .lede{font-size:clamp(1.05rem,2.2vw,1.22rem); color:var(--ink-2); max-width:54ch; margin-top:26px}
+.hero .acts{display:flex; gap:11px; flex-wrap:wrap; margin-top:32px}
 
+/* specimen */
+.spec{margin-top:clamp(46px,8vw,72px); border:1px solid var(--line); border-radius:16px; overflow:hidden; background:var(--surface)}
+.spec-row{padding:22px 26px}
+.spec-row + .spec-row{border-top:1px solid var(--line)}
+.spec-row .mono{color:var(--ink-3); display:block; margin-bottom:11px}
+.spec-row.after .mono{color:var(--accent)}
+.spec p{font-family:var(--serif); font-size:clamp(1.15rem,3.2vw,1.5rem); line-height:1.42; color:var(--ink)}
+.spec .num{
+  font-family:var(--mono); font-size:.7rem; font-weight:600; letter-spacing:.09em;
+  color:var(--ink-3); margin-top:13px; display:block; font-variant-numeric:tabular-nums;
+}
+.spec mark{transition:background .5s ease, color .5s ease}
+.fade mark{background:transparent !important; color:var(--ink-3) !important; text-decoration:line-through; text-decoration-color:var(--bad)}
+@media(max-width:560px){ .spec-row{padding:18px 18px} }
+
+/* tools */
+.tools{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:clamp(46px,8vw,76px)}
+@media(max-width:760px){ .tools{grid-template-columns:1fr} }
+.tool{
+  display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line);
+  border-radius:16px; padding:28px 28px 26px; text-decoration:none; color:inherit;
+  transition:border-color .16s, transform .16s, box-shadow .16s;
+}
+.tool:hover{border-color:var(--accent); transform:translateY(-3px); box-shadow:var(--shadow)}
+.tool .step{font-family:var(--mono); font-size:.66rem; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--accent)}
+.tool h2{font-family:var(--serif); font-size:1.85rem; line-height:1.1; margin:12px 0 10px}
+.tool p{color:var(--ink-2); font-size:.97rem; flex:1}
+.tool .meta{display:flex; gap:8px; flex-wrap:wrap; margin-top:18px}
+.tool .go{margin-top:18px; font-weight:600; color:var(--accent); font-size:.93rem}
+
+/* method */
+.sec{margin-top:clamp(56px,10vw,96px)}
+.sec > h2{font-family:var(--serif); font-size:clamp(1.9rem,4.6vw,2.6rem); line-height:1.06; max-width:20ch}
+.sec > .sub{color:var(--ink-2); max-width:56ch; margin-top:14px; font-size:1.03rem}
+.method{list-style:none; padding:0; margin:34px 0 0; border-top:1px solid var(--line)}
+.method li{display:grid; grid-template-columns:132px 1fr; gap:20px; padding:20px 2px; border-bottom:1px solid var(--line); align-items:start}
+.method .k{font-family:var(--mono); font-size:.66rem; font-weight:600; letter-spacing:.11em; text-transform:uppercase; color:var(--accent); padding-top:4px}
+.method .v{color:var(--ink-2); font-size:.99rem}
+.method .v b{color:var(--ink); font-weight:600}
+@media(max-width:640px){ .method li{grid-template-columns:1fr; gap:7px} .method .k{padding-top:0} }
+
+.honest{margin-top:26px; display:grid; grid-template-columns:1fr 1fr; gap:14px}
+@media(max-width:760px){ .honest{grid-template-columns:1fr} }
+.honest .card h3{font-family:var(--sans); font-weight:600; font-size:.95rem; margin-bottom:12px}
+.honest ul{list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:9px}
+.honest li{display:flex; gap:10px; font-size:.94rem; color:var(--ink-2); line-height:1.5}
+.honest li::before{flex:none; font-family:var(--mono); font-weight:600}
+.honest .is li::before{content:"+"; color:var(--good)}
+.honest .isnt li::before{content:"−"; color:var(--bad)}
+</style>
+</head>
+<body>
+
+<header class="bar"><div class="bar-in">
+  <a class="mark" href="./">The <em>Practice</em> Room</a>
+  <div class="bar-sp"></div>
+  <nav class="bar-nav">
+    <a href="./" aria-current="page">Home</a>
+    <a href="check.html">Assessment</a>
+    <a href="train.html">28 days</a>
+  </nav>
+</div></header>
+
+<main class="page">
+  <section class="hero">
+    <span class="mono kicker">Free · nothing to sign up for</span>
+    <h1>Most people aren't bad at talking. They're bad at <em>two things</em>.</h1>
+    <p class="lede">Everything else works fine. This finds which two, and then makes you practise them out loud for twenty-eight days — measuring what actually comes out of your mouth rather than asking how you felt it went.</p>
+    <div class="acts">
+      <a class="btn" href="check.html">Take the assessment</a>
+      <a class="btn ghost" href="train.html">Skip to Day 1</a>
+    </div>
+  </section>
+
+  <section class="spec" id="spec" aria-label="Example of the feedback">
+    <div class="spec-row">
+      <span class="mono">What you said</span>
+      <p><mark>Um</mark>, so <mark>basically</mark> I <mark class="h">kind of</mark> look after, <mark>you know</mark>, the numbers side of things, and <mark class="h">I think</mark> it's <mark class="h">sort of</mark> going okay, <mark>yeah</mark>.</p>
+      <span class="num">27 words · 14.8 fillers per 100 · 6 qualifiers</span>
+    </div>
+    <div class="spec-row after">
+      <span class="mono">What you meant</span>
+      <p>I look after the numbers. It's going well.</p>
+      <span class="num">8 words · 0 fillers · 0 qualifiers</span>
+    </div>
+  </section>
+
+  <section class="tools">
+    <a class="tool" href="check.html">
+      <span class="step">Start here</span>
+      <h2>The assessment</h2>
+      <p>Twenty questions across five things: clarity, presence, initiation, flow and recovery. It scores each one and tells you which two are costing you the most — then builds a four-week plan around those and deliberately ignores the rest.</p>
+      <div class="meta"><span class="chip work">5 minutes</span><span class="chip review">20 questions</span></div>
+      <span class="go">Take it →</span>
+    </a>
+    <a class="tool" href="train.html">
+      <span class="step">Then this, daily</span>
+      <h2>The 28 days</h2>
+      <p>One scenario a day, half work and half social. You say your answer out loud, it listens, and it hands back real numbers: filler rate, pace, hedging, sentence length. Plus one thing to change — one, never a list.</p>
+      <div class="meta"><span class="chip social">Speak out loud</span><span class="chip work">Tracks progress</span></div>
+      <span class="go">Open Day 1 →</span>
+    </a>
+  </section>
+
+  <section class="sec">
+    <h2>Why measure it instead of just practising?</h2>
+    <p class="sub">Because you can't hear yourself. The gap between how a conversation felt and how it actually sounded is where most people get stuck for years, and the only way across it is a number you didn't choose.</p>
+    <ul class="method">
+      <li><span class="k">Filler rate</span><span class="v">Every <b>um, basically, you know, like</b> counted, per hundred words. Above five and people hear it. This is the number that moves fastest with practice, which is why it's the one to attack first.</span></li>
+      <li><span class="k">Pace</span><span class="v">Words per minute. <b>110–155</b> reads as composed. Over 180 and you're sprinting — which is the loudest, most reliable signal of nerves there is, and the easiest to fix on purpose.</span></li>
+      <li><span class="k">Hedging</span><span class="v"><b>I think, maybe, probably, sort of.</b> Each one quietly withdraws the sentence it's sitting in. Most people have no idea how many they use until they're counted.</span></li>
+      <li><span class="k">Sentence length</span><span class="v">Long sentences are where listeners lose the thread and where fillers breed. Over <b>26 words</b> on average and you're asking too much of whoever's listening.</span></li>
+      <li><span class="k">One fix</span><span class="v">You get told <b>a single thing</b> to change, chosen from whichever measure is worst. A list of eight improvements is how people end up making none.</span></li>
+    </ul>
+  </section>
+
+  <section class="sec">
+    <h2>What this is, and what it isn't</h2>
+    <div class="honest">
+      <div class="card">
+        <h3>What it does</h3>
+        <ul class="is">
+          <li>Counts what you actually said, out loud, and shows you the numbers</li>
+          <li>Gives you a structured curriculum instead of vague advice to "be more confident"</li>
+          <li>Runs entirely in your browser — no account, no upload, no cost</li>
+          <li>Tracks whether you're improving across the four weeks</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>What it doesn't</h3>
+        <ul class="isnt">
+          <li>Judge whether you were interesting, warm, or worth talking to — it counts words, not connection</li>
+          <li>Replace doing this with actual people, which is the only thing that finally works</li>
+          <li>Diagnose anything. It's a practice tool, not an assessment of you</li>
+          <li>Substitute for therapy if anxiety is the real obstacle</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot"><div class="foot-in">
+  <div class="links">
+    <a href="./">Home</a>
+    <a href="check.html">Assessment</a>
+    <a href="train.html">28 days</a>
+  </div>
+  <div class="bar-sp"></div>
+  <p>Everything runs in your browser. Nothing you say or type is uploaded, and audio is never saved. Scores live on your own device only. If social anxiety is significantly affecting your life, a therapist will get you further than any drill — CBT has strong evidence behind it for exactly this.</p>
+</div></footer>
+
+<script>
+// One orchestrated moment: the fillers strike themselves out as you arrive.
+(function(){
+  var spec = document.getElementById("spec");
+  if(!spec || !("IntersectionObserver" in window)) return;
+  if(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  var io = new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){
+        setTimeout(function(){ spec.classList.add("fade"); }, 900);
+        io.disconnect();
+      }
+    });
+  }, {threshold:.4});
+  io.observe(spec);
+})();
+</script>
+</body>
+</html>
