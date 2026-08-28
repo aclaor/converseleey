@@ -111,6 +111,19 @@
 .acts{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
 .disc{font-size:.85rem;color:var(--ink-3);margin-top:28px;padding-top:18px;border-top:1px solid var(--line)}
 .tiny{font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+
+.vset{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}
+.vset summary{cursor:pointer;font-family:var(--mono);font-size:.68rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);list-style:none}
+.vset summary::-webkit-details-marker{display:none}
+.vset summary::before{content:"▸ ";color:var(--accent)}
+.vset[open] summary::before{content:"▾ "}
+.vset-b{padding:14px 0 4px;max-width:460px}
+.vset-b label{display:block;font-size:.78rem;font-weight:600;color:var(--ink-2);margin:14px 0 5px}
+.vset-b select,.vset-b input{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--inset);color:var(--ink);font:inherit;font-size:.92rem;margin-bottom:7px}
+.vhint{font-size:.83rem;color:var(--ink-3);margin:6px 0 2px;line-height:1.5}
+.vnote{font-size:.85rem;color:var(--bad);margin-top:8px;min-height:1px}
+.vrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.btn.sm{padding:7px 13px;font-size:.86rem}
 </style>
 </head>
 <body>
@@ -133,7 +146,7 @@
 <!-- 1 · KEY -->
 <section class="stage live" id="s-key">
   <div class="head">
-    <span class="mono">Roleplay · unlimited · your key · build 10</span>
+    <span class="mono">Roleplay · unlimited · your key · build 11</span>
     <h1>Have the conversation before you have to.</h1>
     <p>An AI character plays the other person — the interviewer, the manager, the date — and stays in role. It won't coach you mid-scene, because nobody does that in real life. When you end it, it breaks character and tells you what you actually did.</p>
     <p>It runs straight from your browser to whichever provider you pick, using <b>your own key</b>. Three of the four have a genuinely free tier, so this can cost you nothing.</p>
@@ -202,6 +215,29 @@
       <span class="hint" id="hint"></span>
       <span class="usage" id="useScene"></span>
     </div>
+    <details class="vset">
+      <summary>Voice settings</summary>
+      <div class="vset-b">
+        <label for="voicepick">Voice on this device (free)</label>
+        <select id="voicepick"></select>
+        <p class="vhint">Every phone and computer ships different voices. The best one here is picked for you, but the list is worth a scroll — quality varies enormously.</p>
+
+        <label for="neuralprov">Or use a real neural voice (paid, optional)</label>
+        <select id="neuralprov">
+          <option value="">Off — use the device voice</option>
+          <option value="elevenlabs">ElevenLabs</option>
+          <option value="openai">OpenAI</option>
+        </select>
+        <input id="neuralkey" type="password" placeholder="API key for that service" autocomplete="off">
+        <input id="neuralvoice" placeholder="Voice ID (optional — a sensible default is used)" autocomplete="off">
+        <div class="vrow">
+          <button class="btn sm" id="neuralsave">Save</button>
+          <button class="btn ghost sm" id="neuraltest">Test the voice</button>
+        </div>
+        <p class="vhint">This sounds close to human, and it costs money per minute spoken — roughly five to fifteen cents. The key stays in this browser. If it ever fails mid-scene, the device voice takes over rather than leaving you in silence.</p>
+        <p class="vnote" id="voicenote"></p>
+      </div>
+    </details>
   </div>
   <div id="scErr"></div>
 </section>
@@ -781,7 +817,7 @@ async function selfTest(){
   rows.push(line(null, "Running…")); paint();
   rows.length = 0;
 
-  rows.push(line(true, "Page build", "build 10")); paint();
+  rows.push(line(true, "Page build", "build 11")); paint();
   rows.push(line(!!apiKey, "API key present", apiKey ? "stored in this browser" : "no key saved")); paint();
   rows.push(line(!!model, "Model selected", model || "none — reconnect on the first screen")); paint();
 
@@ -818,43 +854,81 @@ async function selfTest(){
 /* The character reads its lines aloud with the browser's own speech engine.
    No API, no cost, and it works where the microphone doesn't (Safari, iPhone). */
 const TTS = window.speechSynthesis || null;
-const VOICE_KEY = "practiceroom.voice";
+const VOICE_KEY  = "practiceroom.voice";
+const VNAME_KEY  = "practiceroom.voicename";
+const NEURAL_KEY = "practiceroom.neural";     // {provider, key, voice}
 let voiceOn = false, chosenVoice = null, spokenUpTo = 0;
+let neural = null;                            // null = free browser voice
 
 try{ voiceOn = localStorage.getItem(VOICE_KEY) === "1"; }catch(e){}
+try{ neural = JSON.parse(localStorage.getItem(NEURAL_KEY) || "null"); }catch(e){ neural = null; }
 
-function pickVoice(){
-  if(!TTS) return null;
-  const all = TTS.getVoices();
-  if(!all.length) return null;
+/* ---------- the free voice ----------
+   Every device ships different voices and most of them are bad. This ranks
+   what is actually installed and takes the least synthetic one. */
+function voiceList(){
+  if(!TTS) return [];
+  try{ return TTS.getVoices() || []; }catch(e){ return []; }
+}
+function voiceScore(v){
+  let n = 0;
   const lang = (navigator.language || "en-US").toLowerCase();
-  const score = v => {
-    let n = 0;
-    const vl = (v.lang || "").toLowerCase();
-    if(vl === lang) n += 6; else if(vl.slice(0,2) === lang.slice(0,2)) n += 4;
-    if(v.localService) n += 2;
-    if(/natural|neural|enhanced|premium/i.test(v.name)) n += 3;
-    if(/google|samantha|daniel|karen|serena/i.test(v.name)) n += 1;
-    if(/compact|espeak/i.test(v.name)) n -= 3;
-    return n;
-  };
-  return all.slice().sort((a,b) => score(b) - score(a))[0];
+  const vl = (v.lang || "").toLowerCase();
+  if(vl === lang) n += 8; else if(vl.slice(0,2) === lang.slice(0,2)) n += 5; else n -= 10;
+  // the good modern engines label themselves
+  if(/neural|natural|premium|enhanced|siri/i.test(v.name)) n += 12;
+  if(/google/i.test(v.name)) n += 6;
+  // named Apple voices, best first
+  if(/ava|zoe|allison|samantha|serena|nicky|aaron|tom\b/i.test(v.name)) n += 5;
+  if(/daniel|karen|moira|tessa|fiona/i.test(v.name)) n += 3;
+  // the ones that sound like 1998
+  if(/compact|espeak|festival|pico|albert|bad news|good news|bells|bubbles|cellos|organ|trinoids|whisper|zarvox|boing|jester|wobble|superstar/i.test(v.name)) n -= 25;
+  if(v.localService) n += 1;
+  return n;
+}
+function pickVoice(){
+  const all = voiceList();
+  if(!all.length) return null;
+  const ranked = all.slice().sort((a,b) => voiceScore(b) - voiceScore(a));
+  let saved = null;
+  try{ saved = localStorage.getItem(VNAME_KEY); }catch(e){}
+  if(saved){
+    const hit = all.find(v => v.name === saved);
+    if(hit) return hit;
+  }
+  return ranked[0];
 }
 if(TTS){
   chosenVoice = pickVoice();
-  TTS.onvoiceschanged = () => { if(!chosenVoice) chosenVoice = pickVoice(); };
+  try{ TTS.onvoiceschanged = () => { chosenVoice = pickVoice(); paintVoicePicker(); }; }catch(e){}
 }
 
-function speakStop(){
-  if(TTS) try{ TTS.cancel(); }catch(e){}
-  const b = $("#spk"); if(b) b.classList.remove("talking");
+/* The picker. Voices load asynchronously on most browsers, so this is called
+   again when they arrive. */
+function paintVoicePicker(){
+  const sel = document.getElementById("voicepick");
+  if(!sel) return;
+  const all = voiceList().slice().sort((a,b) => voiceScore(b) - voiceScore(a));
+  if(!all.length){ sel.innerHTML = '<option>No voices found on this device</option>'; return; }
+  const cur = chosenVoice ? chosenVoice.name : "";
+  sel.innerHTML = all.map(v =>
+    '<option value="' + v.name.replace(/"/g,"&quot;") + '"' + (v.name === cur ? " selected" : "") + '>' +
+    v.name + " (" + v.lang + ")</option>"
+  ).join("");
 }
 
+/* Speaking rate. Real speech is a little quicker than the default and the
+   pitch sits slightly below 1. A tiny random wobble per line stops the
+   metronome effect that makes TTS sound mechanical. */
 function speakChunk(text){
-  if(!voiceOn || !TTS || !text.trim()) return;
-  const u = new SpeechSynthesisUtterance(text.trim());
+  const t = (text || "").trim();
+  if(!voiceOn || !t) return;
+  if(neural && neural.key){ neuralSpeak(t); return; }
+  if(!TTS) return;
+  const u = new SpeechSynthesisUtterance(humanise(t));
   if(chosenVoice) u.voice = chosenVoice;
-  u.rate = 1.0; u.pitch = 1.0;
+  u.rate  = 1.04 + (Math.random() * 0.06 - 0.03);
+  u.pitch = 0.96 + (Math.random() * 0.08 - 0.04);
   u.onstart = () => { const b = $("#spk"); if(b) b.classList.add("talking"); };
   u.onend = u.onerror = () => {
     if(TTS && !TTS.pending && !TTS.speaking){
@@ -864,20 +938,124 @@ function speakChunk(text){
   try{ TTS.speak(u); }catch(e){}
 }
 
+/* Synthesisers read punctuation literally and race through clauses. Nudging
+   the text gives the delivery somewhere to breathe. */
+function humanise(t){
+  return t
+    .replace(/\s*—\s*/g, ", ")      // em dash read as a hard stop sounds clipped
+    .replace(/\.\.\./g, ", ")       // ellipsis is usually silent otherwise
+    .replace(/([,;:])\s*/g, "$1 ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/* ---------- the paid voice ----------
+   Optional. If anything at all goes wrong we fall back to the free voice
+   rather than leaving the user in silence. */
+const NEURAL = {
+  elevenlabs: {
+    label: "ElevenLabs",
+    voice: "21m00Tcm4TlvDq8ikWAM",           // Rachel, a sane default
+    url:   v => "https://api.elevenlabs.io/v1/text-to-speech/" + v,
+    head:  k => ({"xi-api-key": k, "content-type":"application/json"}),
+    body:  t => JSON.stringify({text:t, model_id:"eleven_turbo_v2_5",
+             voice_settings:{stability:0.4, similarity_boost:0.75, style:0.35}})
+  },
+  openai: {
+    label: "OpenAI",
+    voice: "alloy",
+    url:   () => "https://api.openai.com/v1/audio/speech",
+    head:  k => ({"Authorization":"Bearer " + k, "content-type":"application/json"}),
+    body:  (t, v) => JSON.stringify({model:"gpt-4o-mini-tts", voice:v || "alloy", input:t})
+  }
+};
+
+let audioQueue = [], audioBusy = false, audioEl = null;
+
+async function neuralSpeak(text){
+  const cfg = NEURAL[neural.provider];
+  if(!cfg){ neural = null; speakChunk(text); return; }
+  audioQueue.push(text);
+  if(!audioBusy) drainAudio();
+}
+
+async function drainAudio(){
+  if(audioBusy) return;
+  audioBusy = true;
+  const b = $("#spk"); if(b) b.classList.add("talking");
+  while(audioQueue.length && voiceOn && neural){
+    const text = audioQueue.shift();
+    const cfg  = NEURAL[neural.provider];
+    try{
+      const r = await fetch(cfg.url(neural.voice || cfg.voice), {
+        method:"POST", headers: cfg.head(neural.key), body: cfg.body(text, neural.voice)
+      });
+      if(!r.ok){
+        const msg = (await r.text()).slice(0, 200);
+        neuralFailed(msg);
+        speakFree(text);
+        continue;
+      }
+      const blob = await r.blob();
+      await playBlob(blob);
+    }catch(e){
+      neuralFailed(e.message || "the request failed");
+      speakFree(text);
+    }
+  }
+  audioBusy = false;
+  if(b) b.classList.remove("talking");
+}
+
+function playBlob(blob){
+  return new Promise(res => {
+    const url = URL.createObjectURL(blob);
+    audioEl = new Audio(url);
+    const done = () => { try{ URL.revokeObjectURL(url); }catch(e){} res(); };
+    audioEl.onended = done;
+    audioEl.onerror = done;
+    audioEl.play().catch(done);
+  });
+}
+
+/* Force the browser voice regardless of settings — the fallback path. */
+function speakFree(text){
+  if(!TTS || !voiceOn) return;
+  const u = new SpeechSynthesisUtterance(humanise(text));
+  if(chosenVoice) u.voice = chosenVoice;
+  u.rate = 1.04; u.pitch = 0.96;
+  try{ TTS.speak(u); }catch(e){}
+}
+
+let neuralWarned = false;
+function neuralFailed(msg){
+  if(neuralWarned) return;
+  neuralWarned = true;
+  const el = document.getElementById("voicenote");
+  if(el) el.textContent = "The paid voice failed (" + msg + "). Using your device's voice instead.";
+}
+
+function speakStop(){
+  if(TTS) try{ TTS.cancel(); }catch(e){}
+  audioQueue = [];
+  if(audioEl) try{ audioEl.pause(); }catch(e){}
+  const b = $("#spk"); if(b) b.classList.remove("talking");
+}
+
 /* Speak sentence by sentence as they finish streaming, so the reply starts
    sounding almost immediately rather than after the whole thing lands. */
 function speakProgress(full){
-  if(!voiceOn || !TTS) return;
-  for(;;){
-    const pending = full.slice(spokenUpTo);
-    const m = pending.match(/^[\s\S]*?[.!?\u2026](?=\s|$)/);
-    if(!m || m[0].trim().length <= 1) break;
+  if(!voiceOn) return;
+  const pending = full.slice(spokenUpTo);
+  const re = /[^.!?…]+[.!?…]+["')\]]*\s*/g;
+  let m;
+  while((m = re.exec(pending)) !== null){
     speakChunk(m[0]);
     spokenUpTo += m[0].length;
   }
 }
 function speakRest(full){
-  if(!voiceOn || !TTS) return;
+  if(!voiceOn) return;
   const rest = full.slice(spokenUpTo);
   if(rest.trim()){ speakChunk(rest); spokenUpTo = full.length; }
 }
@@ -899,14 +1077,25 @@ THE SCENE: ${scene.sit}
 YOUR CHARACTER: ${scene.role}
 WHAT THEY ARE TRYING TO DO: ${scene.goal}
 
-Rules, all strict:
-- Stay in character for the entire conversation. Never coach, never evaluate, never comment on how they are speaking, never break role, never mention that this is practice or that you are an AI.
-- Talk the way people talk out loud: one to three sentences, contractions, no bullet points, no markdown, no stage directions.
-- React honestly to how they handle it. If they ramble, show it — cut in, or let your attention drift. If they're vague, ask what a real person would ask. If they handle it well, respond accordingly and move things forward.
-- Never ask more than one question at a time.
-- Keep your lines shorter than theirs. Leave them room.
+Everything you write will be READ ALOUD. Write speech, not prose. This matters more than anything else below.
 
-Open the scene now with a single natural line.`;
+HOW TO SOUND LIKE A PERSON:
+- Short. Usually one or two sentences. Sometimes just three or four words. A real person does not deliver a paragraph.
+- Contractions always: I'm, don't, that's, you've, kinda, gonna where it fits.
+- Start sentences the way speech starts: "Okay, so...", "Right.", "Hm.", "Yeah, no, I get that.", "Look...", "Honestly?"
+- Broken grammar is good. Trail off. Restart a sentence. "I mean — well, it's not that simple."
+- Never use a semicolon, a colon, a bullet, a numbered list, bold, or a heading. Never use an em dash where a person would just stop and start again.
+- No stage directions, no *actions in asterisks*, no "(laughs)".
+- Do not use the tidy written constructions: "Furthermore", "In addition", "It's important to note", "Let me know if". Nobody says these.
+- React to the specific words they just said. Quote a phrase of theirs back sometimes. That is what makes it feel real.
+
+HOW TO BEHAVE:
+- Stay in character the whole way. Never coach, never evaluate, never comment on how they're speaking, never break role, never mention practice or AI.
+- Respond honestly to how they handle it. If they ramble, get impatient or cut in. If they're vague, ask the thing a real person would ask. If they do it well, warm up and move forward.
+- One question at a time. Never two.
+- Your lines stay shorter than theirs. Silence is theirs to fill, not yours.
+
+Open the scene now with one short, natural line. Not a greeting paragraph. A line.`;
 }
 
 function coachPrompt(m){
@@ -1242,6 +1431,64 @@ $("#mic").addEventListener("click", () => {
     /* Browsers require a user gesture before they will speak. This click is it. */
     speakChunk("Voice on.");
     $("#hint").textContent = "Replies will be read aloud.";
+  });
+
+  /* --- voice settings --- */
+  paintVoicePicker();
+  setTimeout(paintVoicePicker, 500);   // voices arrive late on most browsers
+
+  const vp = document.getElementById("voicepick");
+  if(vp) vp.addEventListener("change", () => {
+    const hit = voiceList().find(v => v.name === vp.value);
+    if(hit){
+      chosenVoice = hit;
+      try{ localStorage.setItem(VNAME_KEY, hit.name); }catch(e){}
+      neural = null;
+      try{ localStorage.removeItem(NEURAL_KEY); }catch(e){}
+      const np = document.getElementById("neuralprov"); if(np) np.value = "";
+      voiceOn = true;
+      try{ localStorage.setItem(VOICE_KEY, "1"); }catch(e){}
+      paintSpeakBtn();
+      speakFree("This is how I'll sound.");
+    }
+  });
+
+  const np = document.getElementById("neuralprov");
+  const nk = document.getElementById("neuralkey");
+  const nv = document.getElementById("neuralvoice");
+  if(np && neural){ np.value = neural.provider || ""; if(nv) nv.value = neural.voice || ""; }
+
+  const saveNeural = () => {
+    const prov = np ? np.value : "";
+    const note = document.getElementById("voicenote");
+    if(!prov){
+      neural = null;
+      try{ localStorage.removeItem(NEURAL_KEY); }catch(e){}
+      if(note){ note.style.color = "var(--ink-3)"; note.textContent = "Using your device's voice."; }
+      return;
+    }
+    const key = nk ? nk.value.trim() : "";
+    if(!key){
+      if(note){ note.style.color = "var(--bad)"; note.textContent = "That service needs an API key."; }
+      return;
+    }
+    neural = {provider: prov, key: key, voice: (nv ? nv.value.trim() : "") || NEURAL[prov].voice};
+    neuralWarned = false;
+    try{ localStorage.setItem(NEURAL_KEY, JSON.stringify(neural)); }catch(e){}
+    voiceOn = true;
+    try{ localStorage.setItem(VOICE_KEY, "1"); }catch(e){}
+    paintSpeakBtn();
+    if(note){ note.style.color = "var(--good)"; note.textContent = "Saved. " + NEURAL[prov].label + " will read the replies."; }
+  };
+
+  const bs = document.getElementById("neuralsave");
+  if(bs) bs.addEventListener("click", saveNeural);
+
+  const bt = document.getElementById("neuraltest");
+  if(bt) bt.addEventListener("click", () => {
+    saveNeural();
+    voiceOn = true; paintSpeakBtn();
+    speakChunk("Okay, so. This is what I'd sound like in a scene.");
   });
 })();
 document.addEventListener("visibilitychange", () => { if(document.hidden) speakStop(); });
