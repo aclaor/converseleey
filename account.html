@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Account — The Practice Room</title>
+<meta name="description" content="Sign in to The Practice Room. No password — we email you a code.">
+<meta name="theme-color" content="#0C6E75">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127908;</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/base.css">
+<style>
+.wrap{max-width:620px;margin:0 auto;padding:0 20px 90px}
+@media(max-width:560px){.wrap{padding:0 16px 66px}}
+.stage{display:none;animation:rise .34s cubic-bezier(.2,.7,.3,1) both}
+.stage.live{display:block}
+@keyframes rise{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+.head{padding:clamp(36px,6vw,62px) 0 0}
+.head .mono{color:var(--accent);display:block;margin-bottom:14px}
+.head h1{font-family:var(--serif);font-size:clamp(2.1rem,6vw,3rem);line-height:1.03;max-width:16ch}
+.head p{color:var(--ink-2);margin-top:18px;font-size:1.04rem;max-width:54ch}
+.box{margin-top:24px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+.box label{font-weight:600;font-size:.95rem;display:block;margin-bottom:9px}
+.box input{width:100%;font-size:1rem;padding:13px 15px;border-radius:10px;border:1px solid var(--line);
+  background:var(--inset);color:var(--ink)}
+.box input:focus{outline:none;box-shadow:0 0 0 2px var(--accent);border-color:transparent}
+.box input.code{font-family:var(--mono);font-size:1.5rem;letter-spacing:.35em;text-align:center}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center}
+.note{font-size:.87rem;color:var(--ink-3);margin-top:14px;line-height:1.6}
+.err{background:var(--bad-bg);color:var(--bad);border-radius:11px;padding:13px 16px;font-size:.9rem;margin-top:14px}
+.ok{background:var(--good-bg);color:var(--good);border-radius:11px;padding:13px 16px;font-size:.9rem;margin-top:14px}
+.link{background:none;border:none;padding:0;color:var(--accent);font-size:.88rem;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+
+/* account view */
+.plan{display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:space-between}
+.plan .who{font-weight:600;font-size:1.02rem;word-break:break-all}
+.plan .badge{font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  padding:4px 11px;border-radius:99px;background:var(--surface-2);color:var(--ink-2)}
+.plan .badge.pro{background:var(--accent-soft);color:var(--accent)}
+.meter{margin-top:20px}
+.meter .top{display:flex;justify-content:space-between;align-items:baseline;font-size:.9rem;margin-bottom:8px}
+.meter .top b{font-weight:600}
+.meter .top span{font-family:var(--mono);font-size:.78rem;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.meter .tr{height:9px;background:var(--surface-2);border-radius:99px;overflow:hidden}
+.meter .fl{height:100%;border-radius:99px;width:0;background:var(--accent);transition:width .8s cubic-bezier(.2,.8,.3,1)}
+.meter .fl.warn{background:var(--warn)} .meter .fl.full{background:var(--bad)}
+.meter small{display:block;margin-top:9px;font-size:.85rem;color:var(--ink-3)}
+.tiers{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+@media(max-width:560px){.tiers{grid-template-columns:1fr}}
+.tier{border:1px solid var(--line);border-radius:13px;padding:20px 21px;background:var(--surface)}
+.tier.on{border-color:var(--accent);background:var(--accent-soft)}
+.tier h3{font-family:var(--serif);font-weight:400;font-size:1.5rem;margin-bottom:4px}
+.tier .price{font-family:var(--mono);font-size:.8rem;color:var(--ink-3);font-weight:600}
+.tier ul{list-style:none;padding:0;margin:14px 0 0;display:flex;flex-direction:column;gap:7px}
+.tier li{font-size:.9rem;color:var(--ink-2);display:flex;gap:9px}
+.tier li::before{content:"+";color:var(--accent);font-family:var(--mono);font-weight:600;flex:none}
+.tier .btn{margin-top:16px;width:100%;justify-content:center}
+.cfg{margin-top:26px;padding-top:20px;border-top:1px solid var(--line);font-size:.86rem;color:var(--ink-3)}
+.cfg code{font-family:var(--mono);font-size:.85em;background:var(--surface-2);border-radius:4px;padding:1px 5px}
+</style>
+</head>
+<body>
+
+<header class="bar"><div class="bar-in">
+  <a class="mark" href="./">The <em>Practice</em> Room</a>
+  <div class="bar-sp"></div>
+  <nav class="bar-nav">
+    <a href="roleplay.html">Roleplay</a>
+    <a href="report.html">Speech report</a>
+    <a href="check.html">Assessment</a>
+    <a href="account.html" aria-current="page">Account</a>
+  </nav>
+</div></header>
+
+<main class="wrap">
+
+<!-- loading -->
+<section class="stage live" id="s-load">
+  <div class="head"><span class="mono">Account</span><h1>One moment…</h1></div>
+</section>
+
+<!-- email -->
+<section class="stage" id="s-email">
+  <div class="head">
+    <span class="mono">Sign in or create an account</span>
+    <h1>No password. We email you a code.</h1>
+    <p>Same box for signing in and signing up — if we haven't seen your email before, we make the account. Nothing to remember, nothing to leak.</p>
+    <div class="box">
+      <label for="email">Your email</label>
+      <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" spellcheck="false">
+      <div class="row"><button class="btn" id="send">Email me a code</button></div>
+      <div id="emsg"></div>
+      <p class="note">We use your email to sign you in and to tell you if something goes wrong with billing. Nothing else — no marketing, no passing it on.</p>
+    </div>
+  </div>
+</section>
+
+<!-- code -->
+<section class="stage" id="s-code">
+  <div class="head">
+    <span class="mono">Check your email</span>
+    <h1>Enter the six-digit code.</h1>
+    <p>Sent to <b id="sentTo"></b>. It works once and expires in ten minutes. Check spam if it's slow.</p>
+    <div class="box">
+      <label for="code">Sign-in code</label>
+      <input id="code" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="······">
+      <div class="row">
+        <button class="btn" id="verify">Sign in</button>
+        <button class="link" id="again">Use a different email</button>
+      </div>
+      <div id="cmsg"></div>
+    </div>
+  </div>
+</section>
+
+<!-- signed in -->
+<section class="stage" id="s-acct"></section>
+
+</main>
+
+<footer class="foot"><div class="foot-in">
+  <div class="links"><a href="./">Home</a><a href="roleplay.html">Roleplay</a><a href="report.html">Speech report</a><a href="check.html">Assessment</a><a href="train.html">28 days</a><a href="blog.html">Reading</a></div>
+  <div class="bar-sp"></div>
+  <p>Signing in stores one cookie so you stay signed in. Your practice scores stay on your own device.</p>
+</div></footer>
+
+<script>
+"use strict";
+/* ---------------------------------------------------------------------
+   Point this at your deployed Worker. After `wrangler deploy` it prints
+   a URL like https://practiceroom-api.<your-subdomain>.workers.dev
+   --------------------------------------------------------------------- */
+const API_BASE = "https://practiceroom-api.example.workers.dev";
+
+const $ = s => document.querySelector(s);
+const stages = ["s-load","s-email","s-code","s-acct"];
+const show = id => { stages.forEach(s => $("#"+s).classList.toggle("live", s===id)); window.scrollTo({top:0}); };
+let pendingEmail = "";
+
+async function api(path, opts = {}) {
+  const r = await fetch(API_BASE + path, {
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    ...opts
+  });
+  let body = null;
+  try { body = await r.json(); } catch {}
+  if (!r.ok) {
+    const e = new Error((body && (body.message || body.error)) || `HTTP ${r.status}`);
+    e.code = body && body.error; e.status = r.status;
+    throw e;
+  }
+  return body;
+}
+
+function notConfigured(){
+  $("#s-load").innerHTML = `<div class="head">
+    <span class="mono">Not set up yet</span>
+    <h1>The account service isn't connected.</h1>
+    <p>Accounts need the API Worker deployed and its address pasted into this page. Until then everything else on the site still works, and the roleplay runs on your own key.</p>
+    <div class="box"><p class="note">Edit <code>account.html</code> and <code>roleplay.html</code>, and set <code>API_BASE</code> to the URL <code>wrangler deploy</code> printed.</p></div>
+    <div class="row" style="margin-top:20px"><a class="btn ghost" href="roleplay.html">Use roleplay with my own key</a></div>
+  </div>`;
+  show("s-load");
+}
+
+/* ------------------------------------------------------------ sign in */
+$("#send").addEventListener("click", async () => {
+  const email = $("#email").value.trim();
+  $("#emsg").innerHTML = "";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+    $("#emsg").innerHTML = '<div class="err">That doesn\'t look like an email address.</div>'; return;
+  }
+  $("#send").classList.add("off"); $("#send").textContent = "Sending…";
+  try {
+    const res = await api("/api/auth/request", { method:"POST", body: JSON.stringify({ email }) });
+    pendingEmail = email;
+    $("#sentTo").textContent = email;
+    show("s-code"); $("#code").focus();
+    if (res.dev) $("#cmsg").innerHTML =
+      '<div class="ok">Email isn\'t configured on the server, so the code was written to the Worker log instead. Fine for testing.</div>';
+  } catch (e) {
+    $("#emsg").innerHTML = `<div class="err">${e.code === "too_many"
+      ? "Too many code requests for that address. Try again in an hour."
+      : e.message}</div>`;
+  }
+  $("#send").classList.remove("off"); $("#send").textContent = "Email me a code";
+});
+$("#email").addEventListener("keydown", e => { if (e.key === "Enter") $("#send").click(); });
+
+$("#verify").addEventListener("click", async () => {
+  const code = $("#code").value.trim();
+  $("#cmsg").innerHTML = "";
+  if (!/^\d{6}$/.test(code)) { $("#cmsg").innerHTML = '<div class="err">The code is six digits.</div>'; return; }
+  $("#verify").classList.add("off"); $("#verify").textContent = "Checking…";
+  try {
+    await api("/api/auth/verify", { method:"POST", body: JSON.stringify({ email: pendingEmail, code }) });
+    await loadAccount();
+  } catch (e) {
+    const msg = {
+      wrong_code: "That code isn't right. Check the email again.",
+      expired: "That code expired. Ask for a new one.",
+      no_code: "No code outstanding for that address — request a fresh one.",
+      too_many_attempts: "Too many wrong attempts. Request a new code."
+    }[e.code] || e.message;
+    $("#cmsg").innerHTML = `<div class="err">${msg}</div>`;
+  }
+  $("#verify").classList.remove("off"); $("#verify").textContent = "Sign in";
+});
+$("#code").addEventListener("keydown", e => { if (e.key === "Enter") $("#verify").click(); });
+$("#again").addEventListener("click", () => { $("#code").value=""; $("#cmsg").innerHTML=""; show("s-email"); });
+
+/* ------------------------------------------------------------ account */
+function renderAccount(me) {
+  const u = me.usage;
+  const pct = Math.min(100, Math.round(u.messages / u.cap * 100));
+  const band = pct >= 100 ? "full" : pct >= 80 ? "warn" : "";
+  const monthName = new Date(me.period + "-01T00:00:00Z")
+    .toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+
+  $("#s-acct").innerHTML = `
+    <div class="head">
+      <span class="mono">Account</span>
+      <h1>You're signed in.</h1>
+
+      <div class="box">
+        <div class="plan">
+          <span class="who">${me.email}</span>
+          <span class="badge ${me.plan === "pro" ? "pro" : ""}">${me.planLabel}</span>
+        </div>
+        <div class="meter">
+          <div class="top"><b>Messages used — ${monthName}</b><span>${u.messages} / ${u.cap}</span></div>
+          <div class="tr"><div class="fl ${band}" id="fl"></div></div>
+          <small>${pct >= 100
+            ? "You've used this month's allowance. It resets on the 1st."
+            : `${u.cap - u.messages} left this month. Resets on the 1st.`}
+            ${u.tokensIn ? ` · ${(u.tokensIn + u.tokensOut).toLocaleString()} tokens so far.` : ""}</small>
+        </div>
+        <div class="row" style="margin-top:20px">
+          <a class="btn" href="roleplay.html">Start a scene</a>
+          ${me.hasBilling ? '<button class="btn ghost" id="portal">Manage billing</button>' : ""}
+          <button class="link" id="out">Sign out</button>
+        </div>
+        <div id="amsg"></div>
+      </div>
+
+      ${me.plan === "pro" ? "" : `
+      <div class="tiers">
+        <div class="tier on">
+          <h3>Free</h3><div class="price">£0</div>
+          <ul><li>30 messages a month</li><li>Every scene</li><li>All the practice tools</li></ul>
+        </div>
+        <div class="tier">
+          <h3>Pro</h3><div class="price">See checkout for the price</div>
+          <ul><li>1,500 messages a month</li><li>Long scenes without watching the counter</li><li>Cancel any time</li></ul>
+          <button class="btn tier-btn" id="upgrade">Upgrade</button>
+        </div>
+      </div>
+      <p class="cfg">A message is one thing you say in a scene, plus the coaching at the end. Thirty is enough for roughly six or seven full scenes a month.</p>`}
+    </div>`;
+
+  requestAnimationFrame(() => { const f = $("#fl"); if (f) f.style.width = pct + "%"; });
+
+  const out = $("#out");
+  if (out) out.addEventListener("click", async () => {
+    await api("/api/auth/logout", { method:"POST" }).catch(()=>{});
+    show("s-email");
+  });
+
+  const up = $("#upgrade");
+  if (up) up.addEventListener("click", async () => {
+    up.classList.add("off"); up.textContent = "Opening…";
+    try {
+      const r = await api("/api/billing/checkout", { method:"POST" });
+      location.href = r.url;
+    } catch (e) {
+      $("#amsg").innerHTML = `<div class="err">${e.code === "billing_not_configured"
+        ? "Payments aren't switched on yet on the server."
+        : e.message}</div>`;
+      up.classList.remove("off"); up.textContent = "Upgrade";
+    }
+  });
+
+  const portal = $("#portal");
+  if (portal) portal.addEventListener("click", async () => {
+    portal.classList.add("off");
+    try { const r = await api("/api/billing/portal", { method:"POST" }); location.href = r.url; }
+    catch (e) { $("#amsg").innerHTML = `<div class="err">${e.message}</div>`; portal.classList.remove("off"); }
+  });
+
+  if (new URLSearchParams(location.search).get("upgraded"))
+    $("#amsg").innerHTML = '<div class="ok">Payment received. If the plan above still says Free, give it a few seconds and refresh — Stripe tells us separately.</div>';
+
+  show("s-acct");
+}
+
+async function loadAccount() {
+  try {
+    const me = await api("/api/me");
+    if (me.signedIn) renderAccount(me); else show("s-email");
+  } catch (e) {
+    notConfigured();
+  }
+}
+
+if (/example\.workers\.dev/.test(API_BASE)) notConfigured(); else loadAccount();
+</script>
+</body>
+</html>
