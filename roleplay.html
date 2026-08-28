@@ -95,6 +95,9 @@
 .mic:hover{transform:scale(1.07)}
 .mic svg{width:18px;height:18px;fill:var(--ink-2)}
 .mic.live{background:var(--bad)}.mic.live svg{fill:#fff}
+.mic.spk.on{background:var(--accent)}.mic.spk.on svg{fill:var(--on-accent)}
+.mic.spk.talking{animation:pulseSpk 1.1s ease-in-out infinite}
+@keyframes pulseSpk{0%,100%{box-shadow:0 0 0 0 rgba(12,110,117,.45)}50%{box-shadow:0 0 0 9px rgba(12,110,117,0)}}
 .hint{font-size:.83rem;color:var(--ink-3);flex:1;min-width:110px}
 .usage{font-family:var(--mono);font-size:.63rem;font-weight:600;color:var(--ink-3);letter-spacing:.05em;
   white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -130,7 +133,7 @@
 <!-- 1 · KEY -->
 <section class="stage live" id="s-key">
   <div class="head">
-    <span class="mono">Roleplay · unlimited · your key · build 7</span>
+    <span class="mono">Roleplay · unlimited · your key · build 8 · voice</span>
     <h1>Have the conversation before you have to.</h1>
     <p>An AI character plays the other person — the interviewer, the manager, the date — and stays in role. It won't coach you mid-scene, because nobody does that in real life. When you end it, it breaks character and tells you what you actually did.</p>
     <p>It runs straight from your browser to whichever provider you pick, using <b>your own key</b>. Three of the four have a genuinely free tier, so this can cost you nothing.</p>
@@ -193,6 +196,7 @@
     <textarea id="ta" placeholder="Speak with the mic, or type your line. Cmd/Ctrl+Enter sends."></textarea>
     <div class="crow">
       <button class="mic" id="mic" aria-label="Speak"><svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.93V21h2v-3.07A7 7 0 0 0 19 11h-2Z"/></svg></button>
+      <button class="mic spk" id="spk" aria-label="Voice on or off" title="Read replies aloud"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3Zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a6.8 6.8 0 0 1 0 13.4v2.1a8.9 8.9 0 0 0 0-17.6Z"/></svg></button>
       <button class="btn" id="send">Say it</button>
       <button class="btn ghost" id="end">End scene &rarr; coaching</button>
       <span class="hint" id="hint"></span>
@@ -697,7 +701,7 @@ async function selfTest(){
   rows.push(line(null, "Running…")); paint();
   rows.length = 0;
 
-  rows.push(line(true, "Page build", "build 7")); paint();
+  rows.push(line(true, "Page build", "build 8 · voice")); paint();
   rows.push(line(!!apiKey, "API key present", apiKey ? "stored in this browser" : "no key saved")); paint();
   rows.push(line(!!model, "Model selected", model || "none — reconnect on the first screen")); paint();
 
@@ -728,6 +732,84 @@ async function selfTest(){
   }
   paint();
 }
+
+
+/* ======================= VOICE ======================= */
+/* The character reads its lines aloud with the browser's own speech engine.
+   No API, no cost, and it works where the microphone doesn't (Safari, iPhone). */
+const TTS = window.speechSynthesis || null;
+const VOICE_KEY = "practiceroom.voice";
+let voiceOn = false, chosenVoice = null, spokenUpTo = 0;
+
+try{ voiceOn = localStorage.getItem(VOICE_KEY) === "1"; }catch(e){}
+
+function pickVoice(){
+  if(!TTS) return null;
+  const all = TTS.getVoices();
+  if(!all.length) return null;
+  const lang = (navigator.language || "en-US").toLowerCase();
+  const score = v => {
+    let n = 0;
+    const vl = (v.lang || "").toLowerCase();
+    if(vl === lang) n += 6; else if(vl.slice(0,2) === lang.slice(0,2)) n += 4;
+    if(v.localService) n += 2;
+    if(/natural|neural|enhanced|premium/i.test(v.name)) n += 3;
+    if(/google|samantha|daniel|karen|serena/i.test(v.name)) n += 1;
+    if(/compact|espeak/i.test(v.name)) n -= 3;
+    return n;
+  };
+  return all.slice().sort((a,b) => score(b) - score(a))[0];
+}
+if(TTS){
+  chosenVoice = pickVoice();
+  TTS.onvoiceschanged = () => { if(!chosenVoice) chosenVoice = pickVoice(); };
+}
+
+function speakStop(){
+  if(TTS) try{ TTS.cancel(); }catch(e){}
+  const b = $("#spk"); if(b) b.classList.remove("talking");
+}
+
+function speakChunk(text){
+  if(!voiceOn || !TTS || !text.trim()) return;
+  const u = new SpeechSynthesisUtterance(text.trim());
+  if(chosenVoice) u.voice = chosenVoice;
+  u.rate = 1.0; u.pitch = 1.0;
+  u.onstart = () => { const b = $("#spk"); if(b) b.classList.add("talking"); };
+  u.onend = u.onerror = () => {
+    if(TTS && !TTS.pending && !TTS.speaking){
+      const b = $("#spk"); if(b) b.classList.remove("talking");
+    }
+  };
+  try{ TTS.speak(u); }catch(e){}
+}
+
+/* Speak sentence by sentence as they finish streaming, so the reply starts
+   sounding almost immediately rather than after the whole thing lands. */
+function speakProgress(full){
+  if(!voiceOn || !TTS) return;
+  for(;;){
+    const pending = full.slice(spokenUpTo);
+    const m = pending.match(/^[\s\S]*?[.!?\u2026](?=\s|$)/);
+    if(!m || m[0].trim().length <= 1) break;
+    speakChunk(m[0]);
+    spokenUpTo += m[0].length;
+  }
+}
+function speakRest(full){
+  if(!voiceOn || !TTS) return;
+  const rest = full.slice(spokenUpTo);
+  if(rest.trim()){ speakChunk(rest); spokenUpTo = full.length; }
+}
+function speakReset(){ spokenUpTo = 0; }
+
+function paintSpeakBtn(){
+  const b = $("#spk"); if(!b) return;
+  b.classList.toggle("on", voiceOn);
+  b.title = voiceOn ? "Voice on - replies are read aloud" : "Voice off - tap to hear replies";
+  b.setAttribute("aria-pressed", voiceOn ? "true" : "false");
+}
+
 
 /* ======================= SCENE ======================= */
 function rolePrompt(){
@@ -816,6 +898,7 @@ const showErr = e => {
 };
 
 async function openScene(s){
+  speakStop(); speakReset();
   if(inflight) try{ inflight.abort(); }catch(e){}
   inflight = new AbortController();
   coachRun++;
@@ -828,11 +911,14 @@ async function openScene(s){
   $("#thread").innerHTML = ""; $("#scErr").innerHTML = ""; $("#ta").value = "";
   { const t = $("#scErrTop"); if(t) t.innerHTML = ""; }
   $("#end").classList.remove("off"); $("#send").classList.remove("off");
-  $("#hint").textContent = SR ? "Press the mic and say your line." : "Type your line — this browser can't transcribe speech.";
+  $("#hint").textContent = (voiceOn ? "Voice on. " : "") + (SR ? "Press the mic and say your line." : "Type your line, and it will be read back to you.");
   show("s-scene");
   const t = thinking();
   try{
-    const first = await stream(rolePrompt(), [{role:"user", content:"[Begin the scene.]"}], txt => fillBubble(t, txt), 300);
+    speakReset();
+    const first = await stream(rolePrompt(), [{role:"user", content:"[Begin the scene.]"}],
+      txt => { fillBubble(t, txt); speakProgress(txt); }, 300);
+    speakRest(first);
     history.push({role:"user", content:"[Begin the scene.]"});
     history.push({role:"assistant", content:first});
   }catch(e){ t.remove(); showErr(e); }
@@ -847,7 +933,10 @@ async function send(){
   $("#send").classList.add("off");
   const t = thinking();
   try{
-    const reply = await stream(rolePrompt(), history, txt => fillBubble(t, txt), 300);
+    speakReset();
+    const reply = await stream(rolePrompt(), history,
+      txt => { fillBubble(t, txt); speakProgress(txt); }, 300);
+    speakRest(reply);
     history.push({role:"assistant", content:reply});
   }catch(e){ t.remove(); showErr(e); }
   $("#send").classList.remove("off");
@@ -879,6 +968,7 @@ async function endScene(){
   const m = metrics();
   if(m.turns === 0){ $("#hint").textContent = "Say something first."; return; }
   ended = true;
+  speakStop();
   if(listening) stopListening("");
   $("#end").classList.add("off"); $("#send").classList.add("off");
 
@@ -1040,6 +1130,7 @@ $("#mic").addEventListener("click", () => {
     return;
   }
   if(listening){ stopListening(); return; }
+  speakStop();
   base = $("#ta").value ? $("#ta").value + " " : "";
   heardAnything = false; fastFails = 0; noSpeechCount = 0;
   listening = true;
@@ -1047,6 +1138,22 @@ $("#mic").addEventListener("click", () => {
   $("#hint").textContent = "Listening…";
   beginRecognition();
 });
+
+(function(){
+  const b = $("#spk");
+  if(!TTS){ b.style.display = "none"; return; }
+  paintSpeakBtn();
+  b.addEventListener("click", () => {
+    voiceOn = !voiceOn;
+    try{ localStorage.setItem(VOICE_KEY, voiceOn ? "1" : "0"); }catch(e){}
+    paintSpeakBtn();
+    if(!voiceOn){ speakStop(); return; }
+    /* Browsers require a user gesture before they will speak. This click is it. */
+    speakChunk("Voice on.");
+    $("#hint").textContent = "Replies will be read aloud.";
+  });
+})();
+document.addEventListener("visibilitychange", () => { if(document.hidden) speakStop(); });
 
 $("#send").addEventListener("click", send);
 $("#end").addEventListener("click", endScene);
