@@ -121,6 +121,7 @@
     <a href="check.html">Assessment</a>
     <a href="train.html">28 days</a>
     <a href="blog.html">Reading</a>
+    <a href="account.html">Account</a>
   </nav>
 </div></header>
 
@@ -129,7 +130,7 @@
 <!-- 1 · KEY -->
 <section class="stage live" id="s-key">
   <div class="head">
-    <span class="mono">Roleplay · unlimited · your key · build 4</span>
+    <span class="mono">Roleplay · unlimited · your key · build 5</span>
     <h1>Have the conversation before you have to.</h1>
     <p>An AI character plays the other person — the interviewer, the manager, the date — and stays in role. It won't coach you mid-scene, because nobody does that in real life. When you end it, it breaks character and tells you what you actually did.</p>
     <p>It runs straight from your browser to whichever provider you pick, using <b>your own key</b>. Three of the four have a genuinely free tier, so this can cost you nothing.</p>
@@ -204,7 +205,7 @@
 </main>
 
 <footer class="foot"><div class="foot-in">
-  <div class="links"><a href="./">Home</a><a href="roleplay.html">Roleplay</a><a href="report.html">Speech report</a><a href="check.html">Assessment</a><a href="train.html">28 days</a><a href="blog.html">Reading</a></div>
+  <div class="links"><a href="./">Home</a><a href="roleplay.html">Roleplay</a><a href="report.html">Speech report</a><a href="check.html">Assessment</a><a href="train.html">28 days</a><a href="blog.html">Reading</a><a href="account.html">Account</a></div>
   <div class="bar-sp"></div>
   <p>Your key and your conversations stay in this browser. There is no server behind this page.</p>
 </div></footer>
@@ -321,6 +322,12 @@ const PROVIDERS = {
   }
 };
 
+/* Point this at your deployed Worker to enable accounts. Leave it as the
+   example URL and the page stays bring-your-own-key only. */
+const API_BASE = "https://practiceroom-api.example.workers.dev";
+const ACCOUNTS_ON = !/example\.workers\.dev/.test(API_BASE);
+
+let account = null;                 // set when signed in: {email, plan, usage:{...}}
 let provider = "groq";
 let apiKey = null, model = null;
 let capMax = null;   // set if a model tells us its max_tokens ceiling
@@ -432,6 +439,7 @@ function capFromError(msg){
 
 async function stream(system, messages, onText, maxTokens){
   const want = maxTokens || 320;
+  if(account) return streamViaAccount(system, messages, onText, want);
   try{
     return await streamOnce(system, messages, onText, want);
   }catch(e){
@@ -442,6 +450,63 @@ async function stream(system, messages, onText, maxTokens){
     capMax = cap;                       // remember for the rest of the session
     return await streamOnce(system, messages, onText, cap);
   }
+}
+
+/* Signed in: the server holds the key, counts the messages and enforces the cap.
+   Nothing secret comes near this page. */
+async function streamViaAccount(system, messages, onText, maxTokens){
+  const r = await fetch(API_BASE + "/api/chat", {
+    method:"POST", credentials:"include",
+    headers:{"content-type":"application/json"},
+    body: JSON.stringify({system, messages, max_tokens: maxTokens})
+  });
+  if(!r.ok){
+    let j = null; try{ j = await r.json(); }catch(e){}
+    if(j && j.error === "cap_reached"){
+      const err = new Error(j.message || "Monthly limit reached.");
+      err.cap = true; err.plan = j.plan; throw err;
+    }
+    if(r.status === 401){
+      account = null;
+      const err = new Error("Your session expired. Sign in again.");
+      err.signedOut = true; throw err;
+    }
+    throw new Error((j && (j.detail || j.message || j.error)) || `HTTP ${r.status}`);
+  }
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = "", full = "";
+  for(;;){
+    const {done, value} = await reader.read();
+    if(done) break;
+    buf += dec.decode(value, {stream:true});
+    const lines = buf.split("\n"); buf = lines.pop();
+    for(const line of lines){
+      if(!line.startsWith("data:")) continue;
+      const raw = line.slice(5).trim();
+      if(!raw || raw === "[DONE]") continue;
+      let ev; try{ ev = JSON.parse(raw); }catch(e){ continue; }
+      const d = ev.choices && ev.choices[0] && ev.choices[0].delta;
+      if(d && d.content){ full += d.content; onText(full); }
+      if(ev.type === "content_block_delta" && ev.delta && ev.delta.text){ full += ev.delta.text; onText(full); }
+      const g = ev.candidates && ev.candidates[0];
+      const gt = g && g.content && g.content.parts && g.content.parts.map(x=>x.text||"").join("");
+      if(gt){ full += gt; onText(full); }
+    }
+  }
+  refreshAccount();
+  return full;
+}
+
+async function refreshAccount(){
+  if(!ACCOUNTS_ON) return null;
+  try{
+    const r = await fetch(API_BASE + "/api/me", {credentials:"include"});
+    if(!r.ok) return null;
+    const me = await r.json();
+    account = me.signedIn ? me : null;
+    paintUsage();
+    return account;
+  }catch(e){ return null; }
 }
 
 async function streamOnce(system, messages, onText, maxTokens){
@@ -511,10 +576,16 @@ async function streamOnce(system, messages, onText, maxTokens){
 }
 
 function paintUsage(){
-  const t = `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out`;
+  let t;
+  if(account){
+    const u = account.usage;
+    t = `${u.messages} / ${u.cap} messages this month`;
+  } else {
+    t = (tokIn||tokOut) ? `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out` : "";
+  }
   const a = $("#useScene"), b = $("#usePick");
-  if(a) a.textContent = tokIn||tokOut ? t : "";
-  if(b) b.textContent = tokIn||tokOut ? "This session: " + t : "";
+  if(a) a.textContent = t;
+  if(b) b.textContent = t ? (account ? t : "This session: " + t) : "";
 }
 
 /* ======================= KEY SCREEN ======================= */
@@ -662,7 +733,20 @@ function fillBubble(d, txt){
   d.innerHTML = `<span class="who">${scene.who}</span>`;
   const s = document.createElement("span"); s.textContent = txt; d.appendChild(s);
 }
-const showErr = e => { $("#scErr").innerHTML = `<div class="err"><b>The API call failed.</b><br>${String(e.message||e).slice(0,400)}</div>`; };
+const showErr = e => {
+  if(e && e.cap){
+    $("#scErr").innerHTML = `<div class="err"><b>${e.message}</b><br><br>` +
+      (e.plan === "free"
+        ? `<a href="account.html" style="color:inherit;text-decoration:underline">Upgrade for more</a>, or come back on the 1st when it resets.`
+        : `It resets on the 1st.`) + `</div>`;
+    return;
+  }
+  if(e && e.signedOut){
+    $("#scErr").innerHTML = `<div class="err"><b>${e.message}</b><br><br><a href="account.html" style="color:inherit;text-decoration:underline">Sign in again</a></div>`;
+    return;
+  }
+  $("#scErr").innerHTML = `<div class="err"><b>The API call failed.</b><br>${String(e.message||e).slice(0,400)}</div>`;
+};
 
 async function openScene(s){
   scene = s; history = []; ended = false;
@@ -856,7 +940,36 @@ $("#ta").addEventListener("keydown", e => {
 
 /* ======================= BOOT ======================= */
 renderProviders();
+
 (async function(){
+  /* Signed in? Then skip the key screen entirely. */
+  if(ACCOUNTS_ON){
+    const me = await refreshAccount();
+    if(me){
+      const badge = document.createElement("div");
+      badge.className = "warn";
+      badge.style.background = "var(--good-bg)";
+      badge.innerHTML = `<b style="color:var(--good)">Signed in as ${me.email}</b>` +
+        `You're on the ${me.planLabel} plan — ${me.usage.cap - me.usage.messages} of ${me.usage.cap} messages left this month. ` +
+        `No key needed. <a href="account.html" style="color:var(--accent)">Account</a>`;
+      const host = document.querySelector("#s-pick .head");
+      if(host) host.insertBefore(badge, host.querySelector("#scnGroups"));
+      renderPicker();
+      show("s-pick");
+      return;
+    }
+    /* Not signed in — offer it, but keep bring-your-own-key available. */
+    const opt = document.createElement("div");
+    opt.className = "warn";
+    opt.style.background = "var(--accent-soft)";
+    opt.innerHTML = `<b style="color:var(--accent)">Don't want to handle a key?</b>` +
+      `<a href="account.html" style="color:var(--accent);font-weight:600">Create a free account</a> and we'll run it for you — ` +
+      `30 messages a month, no card. Or carry on below with your own key, which stays unlimited.`;
+    const host = document.querySelector("#s-key .head");
+    const anchor = host && host.querySelector(".grp");
+    if(host && anchor) host.insertBefore(opt, anchor);
+  }
+
   const saved = loadSaved();
   if(!saved || !saved.k || !PROVIDERS[saved.p]) return;
   provider = saved.p; apiKey = saved.k;
