@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diagnose — The Practice Room</title>
+<meta name="robots" content="noindex">
+<style>
+:root{--ink:#14181a;--ink2:#5a6468;--line:#dfe4e6;--bg:#fbfbfa;--acc:#0C6E75;--bad:#a83c25;--good:#1f7a44}
+@media(prefers-color-scheme:dark){:root{--ink:#e8eced;--ink2:#9aa5a8;--line:#2a3336;--bg:#12181a;--acc:#48C2CB}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px 18px 80px}
+.w{max-width:720px;margin:0 auto}
+h1{font-size:1.6rem;line-height:1.15;margin:0 0 8px}
+p.l{color:var(--ink2);margin:0 0 26px}
+label{display:block;font-size:.78rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);margin:18px 0 6px}
+select,input,button,textarea{font:inherit;width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;color:#111}
+@media(prefers-color-scheme:dark){select,input,textarea{background:#1b2225;color:var(--ink)}}
+button{background:var(--acc);color:#fff;border:none;font-weight:600;margin-top:22px;cursor:pointer}
+button[disabled]{opacity:.5}
+#out{margin-top:26px;white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;background:#0e1416;color:#d8e0e2;padding:16px;border-radius:10px;min-height:80px}
+.copy{background:transparent;color:var(--acc);border:1px solid var(--line);margin-top:10px}
+</style>
+</head>
+<body>
+<div class="w">
+<h1>Connection diagnosis</h1>
+<p class="l">This page talks to your AI provider and prints exactly what comes back — nothing hidden, nothing swallowed. Run it, then send me the whole black box.</p>
+
+<label for="prov">Provider</label>
+<select id="prov">
+  <option value="groq">Groq</option>
+  <option value="openrouter">OpenRouter</option>
+  <option value="gemini">Google Gemini</option>
+  <option value="anthropic">Anthropic</option>
+</select>
+
+<label for="key">Your API key</label>
+<input id="key" type="password" placeholder="paste your key" autocomplete="off">
+
+<label for="model">Model (leave blank to auto-pick)</label>
+<input id="model" placeholder="e.g. llama-3.3-70b-versatile" autocomplete="off">
+
+<button id="run">Run the diagnosis</button>
+<div id="out">Ready.</div>
+<button class="copy" id="copy">Copy this report</button>
+</div>
+
+<script>
+const P = {
+  groq:      {list:"https://api.groq.com/openai/v1/models",           chat:"https://api.groq.com/openai/v1/chat/completions",           shape:"openai"},
+  openrouter:{list:"https://openrouter.ai/api/v1/models",             chat:"https://openrouter.ai/api/v1/chat/completions",             shape:"openai"},
+  gemini:    {list:"https://generativelanguage.googleapis.com/v1beta/models", chat:"https://generativelanguage.googleapis.com/v1beta/models/MODEL:streamGenerateContent?alt=sse", shape:"gemini"},
+  anthropic: {list:"https://api.anthropic.com/v1/models",             chat:"https://api.anthropic.com/v1/messages",                     shape:"anthropic"}
+};
+const NOT_CHAT = /guard|moderat|classif|safety|whisper|tts|speech|transcri|embed|rerank|distil|sdxl|flux|dall|imagen|veo|stable-?diff|\basr\b/i;
+
+const out = document.getElementById("out");
+let log = "";
+function say(s){ log += s + "\n"; out.textContent = log; }
+
+function headers(p, k){
+  if(p === "anthropic") return {"x-api-key":k, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true", "content-type":"application/json"};
+  if(p === "gemini")    return {"content-type":"application/json", "x-goog-api-key":k};
+  return {"Authorization":"Bearer "+k, "content-type":"application/json"};
+}
+
+document.getElementById("copy").onclick = async () => {
+  try{ await navigator.clipboard.writeText(log); document.getElementById("copy").textContent = "Copied"; }
+  catch(e){ say("\n(Copy failed — select the text above by hand.)"); }
+};
+
+document.getElementById("run").onclick = async () => {
+  const btn = document.getElementById("run");
+  btn.disabled = true;
+  log = ""; out.textContent = "";
+
+  const prov = document.getElementById("prov").value;
+  const key  = document.getElementById("key").value.trim();
+  let model  = document.getElementById("model").value.trim();
+  const cfg  = P[prov];
+
+  say("PRACTICE ROOM DIAGNOSIS");
+  say("time      " + new Date().toISOString());
+  say("browser   " + navigator.userAgent);
+  say("page      " + location.href);
+  say("provider  " + prov);
+  say("key       " + (key ? key.slice(0,4) + "…" + key.slice(-3) + "  (" + key.length + " chars)" : "MISSING"));
+  say("");
+
+  if(!key){ say("STOP: no key entered."); btn.disabled = false; return; }
+
+  /* ---- step 1: can we reach the provider at all? ---- */
+  say("STEP 1 — list models");
+  try{
+    const r = await fetch(cfg.list, {headers: headers(prov, key)});
+    say("  http " + r.status + " " + r.statusText);
+    const body = await r.text();
+    if(!r.ok){
+      say("  body: " + body.slice(0, 600));
+      say("\nSTOP: the provider rejected the key or the request. That message above is from them, not from the site.");
+      btn.disabled = false; return;
+    }
+    let ids = [];
+    try{
+      const j = JSON.parse(body);
+      ids = (j.data || j.models || []).map(m => (m.id || m.name || "").replace(/^models\//, "")).filter(Boolean);
+    }catch(e){ say("  could not parse the model list: " + e.message); }
+    say("  " + ids.length + " models returned");
+    const usable = ids.filter(id => !NOT_CHAT.test(id));
+    say("  " + usable.length + " look like chat models");
+    say("  first few: " + usable.slice(0,6).join(", "));
+    if(!model){ model = usable[0] || ids[0] || ""; say("  auto-picked: " + model); }
+    else { say("  you chose: " + model + (ids.includes(model) ? "  (present in the list)" : "  ⚠ NOT in the list")); }
+  }catch(e){
+    say("  threw: " + e.name + " — " + e.message);
+    say("\nSTOP: the request never completed. This is a network, CORS or extension problem, not a key problem.");
+    say("Try again in a private/incognito window with extensions off.");
+    btn.disabled = false; return;
+  }
+
+  if(!model){ say("\nSTOP: no usable model found."); btn.disabled = false; return; }
+
+  /* ---- step 2: one real streamed message ---- */
+  say("");
+  say("STEP 2 — send one message to " + model);
+
+  let url = cfg.chat, body;
+  if(cfg.shape === "openai"){
+    body = {model, stream:true, max_tokens:120, messages:[{role:"user", content:"Say hello in one short sentence."}]};
+  }else if(cfg.shape === "anthropic"){
+    body = {model, stream:true, max_tokens:120, messages:[{role:"user", content:"Say hello in one short sentence."}]};
+  }else{
+    url = cfg.chat.replace("MODEL", model);
+    body = {contents:[{role:"user", parts:[{text:"Say hello in one short sentence."}]}], generationConfig:{maxOutputTokens:120}};
+  }
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 45000);
+  try{
+    const t0 = Date.now();
+    const r = await fetch(url, {method:"POST", headers: headers(prov, key), body: JSON.stringify(body), signal: ac.signal});
+    say("  http " + r.status + " " + r.statusText + "   (" + (Date.now()-t0) + " ms to first byte)");
+    say("  content-type: " + (r.headers.get("content-type") || "(none)"));
+
+    if(!r.ok){
+      const t = await r.text();
+      say("  body: " + t.slice(0, 800));
+      say("\nSTOP: the provider refused this model. The message above is the reason.");
+      clearTimeout(timer); btn.disabled = false; return;
+    }
+
+    const ctype = (r.headers.get("content-type") || "").toLowerCase();
+    if(!ctype.includes("event-stream")){
+      const t = await r.text();
+      say("  ⚠ this is NOT a stream. Raw body:");
+      say("  " + t.slice(0, 800));
+      say("\nFINDING: the provider ignored stream:true and sent ordinary JSON.");
+      clearTimeout(timer); btn.disabled = false; return;
+    }
+
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let raw = "", chunks = 0, text = "";
+    while(true){
+      const {value, done} = await reader.read();
+      if(done) break;
+      const s = dec.decode(value, {stream:true});
+      raw += s; chunks++;
+      for(const line of s.split("\n")){
+        if(!line.startsWith("data:")) continue;
+        const d = line.slice(5).trim();
+        if(!d || d === "[DONE]") continue;
+        try{
+          const ev = JSON.parse(d);
+          const c = (ev.choices||[])[0];
+          text += (c && c.delta && (c.delta.content||"")) || "";
+          if(ev.delta && ev.delta.text) text += ev.delta.text;
+          if(ev.candidates) text += (ev.candidates[0]?.content?.parts||[]).map(x=>x.text||"").join("");
+        }catch(e){}
+      }
+    }
+    say("  " + chunks + " chunks, " + raw.length + " bytes total");
+    say("  first 400 bytes of the raw stream:");
+    say("  " + raw.slice(0, 400).replace(/\n/g, "\n  "));
+    say("");
+    say("  ASSEMBLED REPLY: " + (text ? JSON.stringify(text) : "(EMPTY — nothing was extracted)"));
+    say("");
+    say(text ? "RESULT: the provider works. The problem is in the page, and this report tells me where."
+             : "RESULT: the provider streamed data but no text came out of it. The raw bytes above show why.");
+  }catch(e){
+    say("  threw: " + e.name + " — " + e.message);
+    say(e.name === "AbortError" ? "\nRESULT: no reply within 45 seconds." : "\nRESULT: the request failed before any reply.");
+  }finally{
+    clearTimeout(timer);
+    btn.disabled = false;
+  }
+};
+</script>
+</body>
+</html>
