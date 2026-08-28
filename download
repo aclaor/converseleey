@@ -1,0 +1,600 @@
+/**
+ * The Practice Room — API
+ *
+ * A Cloudflare Worker holding the provider key, the accounts, and the caps.
+ * Nothing secret ever reaches the browser.
+ *
+ * Routes
+ *   POST /api/auth/request   { email }          -> emails a 6-digit code
+ *   POST /api/auth/verify    { email, code }    -> sets a session cookie
+ *   POST /api/auth/logout
+ *   GET  /api/me                                -> plan, usage, caps
+ *   POST /api/billing/checkout                  -> Stripe Checkout URL
+ *   POST /api/billing/portal                    -> Stripe billing portal URL
+ *   POST /api/stripe/webhook                    -> subscription state
+ *   POST /api/chat           { system, messages, max_tokens } -> streamed reply
+ */
+
+/* ------------------------------------------------------------------ plans */
+const PLANS = {
+  free: { messages: 30,   label: "Free"  },   // messages per calendar month
+  pro:  { messages: 1500, label: "Pro"   }
+};
+const SESSION_DAYS = 30;
+const CODE_TTL_MIN = 10;
+const CODE_MAX_ATTEMPTS = 5;
+
+/* ------------------------------------------------------------------ utils */
+const enc = new TextEncoder();
+const json = (obj, status = 200, extra = {}) =>
+  new Response(JSON.stringify(obj), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8", ...extra }
+  });
+
+const now = () => Math.floor(Date.now() / 1000);
+const period = () => new Date().toISOString().slice(0, 7);      // 'YYYY-MM'
+
+function b64url(buf) {
+  let s = "";
+  const b = new Uint8Array(buf);
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+const hex = buf =>
+  Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+
+async function sha256Hex(str) {
+  return hex(await crypto.subtle.digest("SHA-256", enc.encode(str)));
+}
+
+async function hmacHex(secret, msg) {
+  const key = await crypto.subtle.importKey(
+    "raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  return hex(await crypto.subtle.sign("HMAC", key, enc.encode(msg)));
+}
+
+/* Comparison that doesn't leak how much of the string matched. */
+function timingSafeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function randomToken(bytes = 32) {
+  const b = new Uint8Array(bytes);
+  crypto.getRandomValues(b);
+  return b64url(b);
+}
+
+function randomCode() {
+  const b = new Uint32Array(1);
+  crypto.getRandomValues(b);
+  return String(b[0] % 1000000).padStart(6, "0");
+}
+
+const validEmail = e =>
+  typeof e === "string" && e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e.trim());
+
+/* ------------------------------------------------------------------ CORS */
+function corsHeaders(request, env) {
+  const allowed = (env.ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
+  const origin = request.headers.get("Origin") || "";
+  const ok = allowed.includes(origin);
+  return {
+    "Access-Control-Allow-Origin": ok ? origin : allowed[0] || "",
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Headers": "content-type",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Vary": "Origin"
+  };
+}
+
+/* ------------------------------------------------------------------ auth */
+function cookieFrom(request, name) {
+  const raw = request.headers.get("Cookie") || "";
+  for (const part of raw.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
+  }
+  return null;
+}
+
+function sessionCookie(token, env, maxAge) {
+  const bits = [
+    `pr_session=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "Secure",
+    "SameSite=None",                       // the site is on a different origin to the API
+    `Max-Age=${maxAge}`
+  ];
+  return bits.join("; ");
+}
+
+async function currentUser(request, env) {
+  const token = cookieFrom(request, "pr_session");
+  if (!token) return null;
+  const th = await sha256Hex(token);
+  const row = await env.DB.prepare(
+    `SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.token_hash = ?1 AND s.expires_at > ?2`
+  ).bind(th, now()).first();
+  return row || null;
+}
+
+/* Is this user's paid plan actually still valid? */
+function effectivePlan(user) {
+  if (!user) return "free";
+  if (user.plan !== "pro") return "free";
+  const live = ["active", "trialing", "past_due"].includes(user.plan_status || "");
+  const unexpired = !user.period_end || user.period_end > now();
+  return live && unexpired ? "pro" : "free";
+}
+
+async function getUsage(env, userId) {
+  const row = await env.DB.prepare(
+    `SELECT messages, tokens_in, tokens_out FROM usage WHERE user_id = ?1 AND period = ?2`
+  ).bind(userId, period()).first();
+  return row || { messages: 0, tokens_in: 0, tokens_out: 0 };
+}
+
+/* ------------------------------------------------------------------ email */
+async function sendCode(env, email, code) {
+  if (!env.RESEND_API_KEY) {
+    // No mail provider configured: log it so local development still works.
+    console.log(`[dev] sign-in code for ${email}: ${code}`);
+    return { dev: true };
+  }
+  const r = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      from: env.MAIL_FROM || "The Practice Room <onboarding@resend.dev>",
+      to: [email],
+      subject: `${code} is your sign-in code`,
+      text:
+`Your sign-in code is ${code}
+
+It expires in ${CODE_TTL_MIN} minutes and can be used once.
+
+If you didn't ask to sign in, ignore this email — nobody can get in without the code.`
+    })
+  });
+  if (!r.ok) throw new Error("mail failed: " + (await r.text()).slice(0, 200));
+  return { dev: false };
+}
+
+/* Simple fixed-window throttle. */
+async function throttled(env, key, limit, windowSec) {
+  const t = now();
+  const row = await env.DB.prepare(`SELECT count, window_start FROM throttle WHERE key = ?1`)
+    .bind(key).first();
+  if (!row || t - row.window_start >= windowSec) {
+    await env.DB.prepare(
+      `INSERT INTO throttle (key, count, window_start) VALUES (?1, 1, ?2)
+       ON CONFLICT(key) DO UPDATE SET count = 1, window_start = ?2`
+    ).bind(key, t).run();
+    return false;
+  }
+  if (row.count >= limit) return true;
+  await env.DB.prepare(`UPDATE throttle SET count = count + 1 WHERE key = ?1`).bind(key).run();
+  return false;
+}
+
+/* ------------------------------------------------------------ AI provider */
+const PROVIDER_SHAPE = env => (env.AI_PROVIDER || "groq").toLowerCase();
+
+function providerRequest(env, body) {
+  const shape = PROVIDER_SHAPE(env);
+  const model = env.AI_MODEL;
+  const max = Math.min(Math.max(parseInt(body.max_tokens, 10) || 320, 32), 1024);
+
+  if (shape === "anthropic") {
+    return {
+      url: "https://api.anthropic.com/v1/messages",
+      headers: {
+        "x-api-key": env.AI_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      payload: { model, max_tokens: max, system: body.system, messages: body.messages, stream: true }
+    };
+  }
+  if (shape === "gemini") {
+    return {
+      url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(env.AI_API_KEY)}`,
+      headers: { "content-type": "application/json" },
+      payload: {
+        system_instruction: { parts: [{ text: body.system }] },
+        contents: body.messages.map(m => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }]
+        })),
+        generationConfig: { maxOutputTokens: max }
+      }
+    };
+  }
+  // OpenAI-shaped: Groq, OpenRouter, OpenAI
+  const base = env.AI_BASE_URL || "https://api.groq.com/openai/v1";
+  return {
+    url: `${base}/chat/completions`,
+    headers: { Authorization: `Bearer ${env.AI_API_KEY}`, "content-type": "application/json" },
+    payload: {
+      model, stream: true, max_tokens: max,
+      messages: [{ role: "system", content: body.system }].concat(body.messages),
+      stream_options: { include_usage: true }
+    }
+  };
+}
+
+/* Pull token counts out of whichever event shape this provider streams. */
+function readUsage(shape, ev, acc) {
+  if (shape === "anthropic") {
+    if (ev.type === "message_start" && ev.message?.usage) acc.in += ev.message.usage.input_tokens || 0;
+    if (ev.type === "message_delta" && ev.usage) acc.out += ev.usage.output_tokens || 0;
+  } else if (shape === "gemini") {
+    if (ev.usageMetadata) {
+      acc.in = Math.max(acc.in, ev.usageMetadata.promptTokenCount || 0);
+      acc.out = Math.max(acc.out, ev.usageMetadata.candidatesTokenCount || 0);
+    }
+  } else {
+    const u = ev.usage || ev.x_groq?.usage;
+    if (u) { acc.in += u.prompt_tokens || 0; acc.out += u.completion_tokens || 0; }
+  }
+}
+
+/* ------------------------------------------------------------------ chat */
+async function handleChat(request, env, ctx, cors) {
+  const user = await currentUser(request, env);
+  if (!user) return json({ error: "not_signed_in" }, 401, cors);
+
+  const plan = effectivePlan(user);
+  const cap = PLANS[plan].messages;
+  const used = await getUsage(env, user.id);
+
+  if (used.messages >= cap) {
+    return json({
+      error: "cap_reached", plan, used: used.messages, cap,
+      message: plan === "free"
+        ? `You've used all ${cap} messages this month on the free plan.`
+        : `You've used all ${cap} messages this month.`
+    }, 402, cors);
+  }
+
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "bad_json" }, 400, cors); }
+  if (!Array.isArray(body.messages) || !body.messages.length)
+    return json({ error: "no_messages" }, 400, cors);
+  if (body.messages.length > 60) return json({ error: "too_long" }, 400, cors);
+  for (const m of body.messages) {
+    if (typeof m?.content !== "string" || m.content.length > 8000)
+      return json({ error: "bad_message" }, 400, cors);
+  }
+  if (typeof body.system !== "string" || body.system.length > 8000)
+    return json({ error: "bad_system" }, 400, cors);
+
+  /* Count the message before the call. If the upstream fails the user loses one
+     message from their allowance, which is the safe direction to be wrong in. */
+  await env.DB.prepare(
+    `INSERT INTO usage (user_id, period, messages, updated_at) VALUES (?1, ?2, 1, ?3)
+     ON CONFLICT(user_id, period) DO UPDATE SET messages = messages + 1, updated_at = ?3`
+  ).bind(user.id, period(), now()).run();
+
+  const shape = PROVIDER_SHAPE(env);
+  const { url, headers, payload } = providerRequest(env, body);
+
+  const upstream = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) });
+  if (!upstream.ok || !upstream.body) {
+    let detail = `HTTP ${upstream.status}`;
+    try { const j = await upstream.json(); detail = j.error?.message || j.message || detail; } catch {}
+    return json({ error: "provider_error", detail: String(detail).slice(0, 300) }, 502, cors);
+  }
+
+  /* Pass the stream through untouched, reading usage as it goes. */
+  const acc = { in: 0, out: 0 };
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+
+  const stream = new ReadableStream({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        ctx.waitUntil(
+          env.DB.prepare(
+            `UPDATE usage SET tokens_in = tokens_in + ?3, tokens_out = tokens_out + ?4, updated_at = ?5
+              WHERE user_id = ?1 AND period = ?2`
+          ).bind(user.id, period(), acc.in, acc.out, now()).run()
+        );
+        return;
+      }
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const raw = line.slice(5).trim();
+        if (!raw || raw === "[DONE]") continue;
+        try { readUsage(shape, JSON.parse(raw), acc); } catch {}
+      }
+      controller.enqueue(value);
+    },
+    cancel() { reader.cancel(); }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache",
+      ...cors
+    }
+  });
+}
+
+/* --------------------------------------------------------------- billing */
+const stripeForm = obj => {
+  const p = new URLSearchParams();
+  const walk = (p0, v) => {
+    if (v === undefined || v === null) return;
+    if (typeof v === "object" && !Array.isArray(v)) {
+      for (const k of Object.keys(v)) walk(`${p0}[${k}]`, v[k]);
+    } else if (Array.isArray(v)) {
+      v.forEach((item, i) => walk(`${p0}[${i}]`, item));
+    } else p.set(p0, String(v));
+  };
+  for (const k of Object.keys(obj)) walk(k, obj[k]);
+  return p;
+};
+
+async function stripeCall(env, path, form) {
+  const r = await fetch(`https://api.stripe.com/v1/${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: stripeForm(form)
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error?.message || `Stripe HTTP ${r.status}`);
+  return j;
+}
+
+async function handleCheckout(request, env, cors) {
+  const user = await currentUser(request, env);
+  if (!user) return json({ error: "not_signed_in" }, 401, cors);
+  if (!env.STRIPE_SECRET_KEY || !env.STRIPE_PRICE_ID)
+    return json({ error: "billing_not_configured" }, 500, cors);
+
+  let customerId = user.stripe_customer_id;
+  if (!customerId) {
+    const c = await stripeCall(env, "customers", { email: user.email, metadata: { user_id: user.id } });
+    customerId = c.id;
+    await env.DB.prepare(`UPDATE users SET stripe_customer_id = ?2 WHERE id = ?1`)
+      .bind(user.id, customerId).run();
+  }
+
+  const site = env.SITE_URL || "https://converseleey.pages.dev";
+  const session = await stripeCall(env, "checkout/sessions", {
+    mode: "subscription",
+    customer: customerId,
+    "line_items[0][price]": env.STRIPE_PRICE_ID,
+    "line_items[0][quantity]": 1,
+    success_url: `${site}/account.html?upgraded=1`,
+    cancel_url: `${site}/account.html`,
+    client_reference_id: user.id,
+    allow_promotion_codes: true,
+    "subscription_data[metadata][user_id]": user.id
+  });
+  return json({ url: session.url }, 200, cors);
+}
+
+async function handlePortal(request, env, cors) {
+  const user = await currentUser(request, env);
+  if (!user) return json({ error: "not_signed_in" }, 401, cors);
+  if (!user.stripe_customer_id) return json({ error: "no_customer" }, 400, cors);
+  const site = env.SITE_URL || "https://converseleey.pages.dev";
+  const s = await stripeCall(env, "billing_portal/sessions", {
+    customer: user.stripe_customer_id,
+    return_url: `${site}/account.html`
+  });
+  return json({ url: s.url }, 200, cors);
+}
+
+/* Manual signature verification — see Stripe's "verify manually" guide. */
+async function verifyStripe(env, rawBody, sigHeader) {
+  if (!sigHeader) return false;
+  let t = null;
+  const v1 = [];
+  for (const part of sigHeader.split(",")) {
+    const [k, v] = part.trim().split("=");
+    if (k === "t") t = v;
+    else if (k === "v1") v1.push(v);        // ignore v0 and any future scheme
+  }
+  if (!t || !v1.length) return false;
+
+  const age = Math.abs(now() - parseInt(t, 10));
+  if (!Number.isFinite(age) || age > 300) return false;      // 5-minute tolerance
+
+  const expected = await hmacHex(env.STRIPE_WEBHOOK_SECRET, `${t}.${rawBody}`);
+  return v1.some(sig => timingSafeEqual(sig, expected));
+}
+
+async function handleStripeWebhook(request, env) {
+  const raw = await request.text();                 // raw body, unparsed
+  const ok = await verifyStripe(env, raw, request.headers.get("Stripe-Signature"));
+  if (!ok) return new Response("bad signature", { status: 400 });
+
+  let event;
+  try { event = JSON.parse(raw); } catch { return new Response("bad json", { status: 400 }); }
+
+  // Stripe re-sends events; make handling idempotent.
+  const seen = await env.DB.prepare(`SELECT id FROM webhook_events WHERE id = ?1`)
+    .bind(event.id).first();
+  if (seen) return new Response("ok (duplicate)", { status: 200 });
+  await env.DB.prepare(`INSERT INTO webhook_events (id, type, received_at) VALUES (?1, ?2, ?3)`)
+    .bind(event.id, event.type, now()).run();
+
+  const setPlan = async (customerId, plan, status, periodEnd, subId) => {
+    if (!customerId) return;
+    await env.DB.prepare(
+      `UPDATE users SET plan = ?2, plan_status = ?3, period_end = ?4, stripe_subscription_id = COALESCE(?5, stripe_subscription_id)
+        WHERE stripe_customer_id = ?1`
+    ).bind(customerId, plan, status || null, periodEnd || null, subId || null).run();
+  };
+
+  const o = event.data?.object || {};
+  switch (event.type) {
+    case "checkout.session.completed":
+      if (o.mode === "subscription") await setPlan(o.customer, "pro", "active", null, o.subscription);
+      break;
+    case "customer.subscription.created":
+    case "customer.subscription.updated": {
+      const live = ["active", "trialing", "past_due"].includes(o.status);
+      await setPlan(o.customer, live ? "pro" : "free", o.status, o.current_period_end, o.id);
+      break;
+    }
+    case "customer.subscription.deleted":
+      await setPlan(o.customer, "free", "canceled", null, o.id);
+      break;
+    case "invoice.paid":
+      if (o.customer) await setPlan(o.customer, "pro", "active", o.lines?.data?.[0]?.period?.end, null);
+      break;
+    default:
+      break;
+  }
+  return new Response("ok", { status: 200 });
+}
+
+/* ------------------------------------------------------------------ main */
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const path = url.pathname.replace(/\/+$/, "") || "/";
+    const cors = corsHeaders(request, env);
+
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+
+    // Stripe posts from Stripe's servers, not a browser: no CORS, raw body.
+    if (path === "/api/stripe/webhook" && request.method === "POST")
+      return handleStripeWebhook(request, env);
+
+    try {
+      /* ---- request a sign-in code ---- */
+      if (path === "/api/auth/request" && request.method === "POST") {
+        const { email } = await request.json().catch(() => ({}));
+        if (!validEmail(email)) return json({ error: "bad_email" }, 400, cors);
+        const addr = email.trim().toLowerCase();
+        const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+
+        if (await throttled(env, `code:${addr}`, 5, 3600) ||
+            await throttled(env, `ip:${ip}`, 20, 3600))
+          return json({ error: "too_many", message: "Too many code requests. Try again later." }, 429, cors);
+
+        const code = randomCode();
+        await env.DB.prepare(
+          `INSERT INTO login_codes (email, code_hash, expires_at, attempts, sent_at)
+           VALUES (?1, ?2, ?3, 0, ?4)
+           ON CONFLICT(email) DO UPDATE SET code_hash = ?2, expires_at = ?3, attempts = 0, sent_at = ?4`
+        ).bind(addr, await sha256Hex(code), now() + CODE_TTL_MIN * 60, now()).run();
+
+        let dev = false;
+        try { dev = (await sendCode(env, addr, code)).dev; }
+        catch (e) { return json({ error: "mail_failed", detail: String(e.message).slice(0, 200) }, 502, cors); }
+
+        return json({ ok: true, dev }, 200, cors);
+      }
+
+      /* ---- exchange the code for a session ---- */
+      if (path === "/api/auth/verify" && request.method === "POST") {
+        const { email, code } = await request.json().catch(() => ({}));
+        if (!validEmail(email) || typeof code !== "string")
+          return json({ error: "bad_request" }, 400, cors);
+        const addr = email.trim().toLowerCase();
+
+        const row = await env.DB.prepare(
+          `SELECT code_hash, expires_at, attempts FROM login_codes WHERE email = ?1`
+        ).bind(addr).first();
+        if (!row) return json({ error: "no_code" }, 400, cors);
+        if (row.expires_at < now()) return json({ error: "expired" }, 400, cors);
+        if (row.attempts >= CODE_MAX_ATTEMPTS) return json({ error: "too_many_attempts" }, 429, cors);
+
+        await env.DB.prepare(`UPDATE login_codes SET attempts = attempts + 1 WHERE email = ?1`)
+          .bind(addr).run();
+
+        if (!timingSafeEqual(await sha256Hex(code.trim()), row.code_hash))
+          return json({ error: "wrong_code" }, 400, cors);
+
+        await env.DB.prepare(`DELETE FROM login_codes WHERE email = ?1`).bind(addr).run();
+
+        let user = await env.DB.prepare(`SELECT * FROM users WHERE email = ?1`).bind(addr).first();
+        if (!user) {
+          const id = crypto.randomUUID();
+          await env.DB.prepare(
+            `INSERT INTO users (id, email, created_at, plan) VALUES (?1, ?2, ?3, 'free')`
+          ).bind(id, addr, now()).run();
+          user = { id, email: addr, plan: "free" };
+        }
+
+        const token = randomToken();
+        const maxAge = SESSION_DAYS * 86400;
+        await env.DB.prepare(
+          `INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)`
+        ).bind(await sha256Hex(token), user.id, now(), now() + maxAge).run();
+
+        return json({ ok: true, email: addr }, 200,
+          { ...cors, "Set-Cookie": sessionCookie(token, env, maxAge) });
+      }
+
+      /* ---- logout ---- */
+      if (path === "/api/auth/logout" && request.method === "POST") {
+        const token = cookieFrom(request, "pr_session");
+        if (token) await env.DB.prepare(`DELETE FROM sessions WHERE token_hash = ?1`)
+          .bind(await sha256Hex(token)).run();
+        return json({ ok: true }, 200, { ...cors, "Set-Cookie": sessionCookie("", env, 0) });
+      }
+
+      /* ---- who am I ---- */
+      if (path === "/api/me" && request.method === "GET") {
+        const user = await currentUser(request, env);
+        if (!user) return json({ signedIn: false }, 200, cors);
+        const plan = effectivePlan(user);
+        const used = await getUsage(env, user.id);
+        return json({
+          signedIn: true,
+          email: user.email,
+          plan,
+          planLabel: PLANS[plan].label,
+          status: user.plan_status || null,
+          periodEnd: user.period_end || null,
+          hasBilling: !!user.stripe_customer_id,
+          usage: { messages: used.messages, cap: PLANS[plan].messages,
+                   tokensIn: used.tokens_in, tokensOut: used.tokens_out },
+          period: period()
+        }, 200, cors);
+      }
+
+      if (path === "/api/billing/checkout" && request.method === "POST")
+        return handleCheckout(request, env, cors);
+      if (path === "/api/billing/portal" && request.method === "POST")
+        return handlePortal(request, env, cors);
+      if (path === "/api/chat" && request.method === "POST")
+        return handleChat(request, env, ctx, cors);
+
+      if (path === "/api/health")
+        return json({ ok: true, provider: PROVIDER_SHAPE(env), model: env.AI_MODEL || null }, 200, cors);
+
+      return json({ error: "not_found" }, 404, cors);
+    } catch (e) {
+      console.error(e);
+      return json({ error: "server_error", detail: String(e.message || e).slice(0, 200) }, 500, cors);
+    }
+  }
+};
