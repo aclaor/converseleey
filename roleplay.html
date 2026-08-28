@@ -130,7 +130,7 @@
 <!-- 1 · KEY -->
 <section class="stage live" id="s-key">
   <div class="head">
-    <span class="mono">Roleplay · unlimited · your key · build 6</span>
+    <span class="mono">Roleplay · unlimited · your key · build 7</span>
     <h1>Have the conversation before you have to.</h1>
     <p>An AI character plays the other person — the interviewer, the manager, the date — and stays in role. It won't coach you mid-scene, because nobody does that in real life. When you end it, it breaks character and tells you what you actually did.</p>
     <p>It runs straight from your browser to whichever provider you pick, using <b>your own key</b>. Three of the four have a genuinely free tier, so this can cost you nothing.</p>
@@ -168,9 +168,11 @@
     <p>Each one puts you in a specific moment with a specific person. They react to how you actually handle it — ramble and they get impatient, be vague and they push.</p>
     <div id="scnGroups"></div>
     <div class="acts">
+      <button class="btn ghost" id="selftest">Test connection</button>
       <button class="btn ghost" id="forget">Remove my key from this browser</button>
       <span class="usage" id="usePick"></span>
     </div>
+    <div id="diag"></div>
   </div>
 </section>
 
@@ -184,6 +186,7 @@
       <div class="goal"><b>What you're trying to do</b><span id="scGoal"></span></div>
     </div>
   </div>
+  <div id="scErrTop"></div>
   <div class="thread" id="thread"></div>
   <div class="composer">
     <label class="sr" for="ta">Your line</label>
@@ -667,7 +670,63 @@ function renderPicker(){
     </div></div>`).join("");
   $("#scnGroups").querySelectorAll(".sc").forEach(b =>
     b.addEventListener("click", () => openScene(SCENES[+b.dataset.i])));
+  const st = $("#selftest");
+  if(st && !st.dataset.wired){
+    st.dataset.wired = "1";
+    st.addEventListener("click", async () => {
+      st.classList.add("off"); st.textContent = "Testing…";
+      try{ await selfTest(); } finally { st.classList.remove("off"); st.textContent = "Test connection"; }
+    });
+  }
   paintUsage();
+}
+
+
+/* One round trip, reported step by step, so a failure names itself. */
+async function selfTest(){
+  const box = $("#diag");
+  const line = (ok, label, extra) =>
+    `<div style="display:flex;gap:9px;align-items:flex-start;margin-top:7px">
+       <span style="font-family:var(--mono);font-weight:600;color:${ok===null?"var(--ink-3)":ok?"var(--good)":"var(--bad)"}">${ok===null?"···":ok?"OK ":"FAIL"}</span>
+       <span style="flex:1"><b>${label}</b>${extra?`<br><span style="opacity:.8;font-size:.9em">${extra}</span>`:""}</span>
+     </div>`;
+  const rows = [];
+  const paint = () => box.innerHTML =
+    `<div class="warn" style="background:var(--surface)"><b style="color:var(--ink)">Connection test</b>${rows.join("")}</div>`;
+
+  rows.push(line(null, "Running…")); paint();
+  rows.length = 0;
+
+  rows.push(line(true, "Page build", "build 7")); paint();
+  rows.push(line(!!apiKey, "API key present", apiKey ? "stored in this browser" : "no key saved")); paint();
+  rows.push(line(!!model, "Model selected", model || "none — reconnect on the first screen")); paint();
+
+  if(!apiKey || !model){ return; }
+
+  rows.push(line(null, "Sending one short message…")); paint();
+  const t0 = Date.now();
+  let got = "", err = null;
+  try{
+    got = await streamOnce(
+      "Reply with exactly the word: ready",
+      [{role:"user", content:"Say ready."}],
+      () => {}, 16);
+  }catch(e){ err = e; }
+  rows.pop();
+
+  if(err){
+    const x = explain(err, PROVIDERS[provider]);
+    rows.push(line(false, `${PROVIDERS[provider].name} rejected the request`, x.text.replace(/<[^>]+>/g,"")));
+  } else if(!got.trim()){
+    rows.push(line(false, "Connected, but the model returned nothing",
+      "The request succeeded and the reply was empty. That usually means the model isn't a chat model, or it refused. Try another provider on the first screen."));
+  } else {
+    rows.push(line(true, `${PROVIDERS[provider].name} replied in ${Date.now()-t0}ms`,
+      `Model: ${model} · said: “${got.trim().slice(0,60)}”`));
+    rows.push(line(true, "Everything works",
+      "If a scene still fails, the problem is with that specific scene rather than the connection — tell me which one."));
+  }
+  paint();
 }
 
 /* ======================= SCENE ======================= */
@@ -735,18 +794,25 @@ function fillBubble(d, txt){
   const s = document.createElement("span"); s.textContent = txt; d.appendChild(s);
 }
 const showErr = e => {
+  /* Put it above the conversation as well — the composer is below the fold on phones. */
+  const top = $("#scErrTop");
   if(e && e.cap){
-    $("#scErr").innerHTML = `<div class="err"><b>${e.message}</b><br><br>` +
+    const capHtml = `<div class="err"><b>${e.message}</b><br><br>` +
       (e.plan === "free"
         ? `<a href="account.html" style="color:inherit;text-decoration:underline">Upgrade for more</a>, or come back on the 1st when it resets.`
         : `It resets on the 1st.`) + `</div>`;
+    $("#scErr").innerHTML = capHtml; if(top) top.innerHTML = capHtml;
     return;
   }
   if(e && e.signedOut){
-    $("#scErr").innerHTML = `<div class="err"><b>${e.message}</b><br><br><a href="account.html" style="color:inherit;text-decoration:underline">Sign in again</a></div>`;
+    const h = `<div class="err"><b>${e.message}</b><br><br><a href="account.html" style="color:inherit;text-decoration:underline">Sign in again</a></div>`;
+    $("#scErr").innerHTML = h; if(top) top.innerHTML = h;
     return;
   }
-  $("#scErr").innerHTML = `<div class="err"><b>The API call failed.</b><br>${String(e.message||e).slice(0,400)}</div>`;
+  const detail = String(e && (e.message || e) || "unknown");
+  const h = `<div class="err"><b>The AI didn't reply.</b><br>${detail.slice(0,400)}` +
+    `<br><br><span style="opacity:.8">Provider: ${PROVIDERS[provider].name} · Model: ${model || "none"}</span></div>`;
+  $("#scErr").innerHTML = h; if(top) top.innerHTML = h;
 };
 
 async function openScene(s){
@@ -760,6 +826,7 @@ async function openScene(s){
   $("#scSit").textContent = s.sit;
   $("#scGoal").textContent = s.goal;
   $("#thread").innerHTML = ""; $("#scErr").innerHTML = ""; $("#ta").value = "";
+  { const t = $("#scErrTop"); if(t) t.innerHTML = ""; }
   $("#end").classList.remove("off"); $("#send").classList.remove("off");
   $("#hint").textContent = SR ? "Press the mic and say your line." : "Type your line — this browser can't transcribe speech.";
   show("s-scene");
