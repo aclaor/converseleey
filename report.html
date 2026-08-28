@@ -291,6 +291,19 @@ let t0=0, tick=null, rafId=null, audioCtx=null, blobUrl=null, transcript="";
 let audioEl=null, analysis=null, selMetric=null, selMarker=null;
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let srDead = false;
+const SR_ERR = {
+  "no-speech":"Didn't hear anything. Check your system input is the right microphone, then try again \u2014 or just type.",
+  "audio-capture":"No microphone found. Something else may be using it, or the wrong input device is selected.",
+  "not-allowed":"Microphone blocked. Click the padlock in the address bar and allow the mic for this site.",
+  "service-not-allowed":"Your browser refused the speech service \u2014 often a privacy setting, or a Chromium build without Google speech. Typing still works.",
+  "network":"Speech-to-text needs the internet and the request failed. It runs on Google's servers, so a VPN, firewall or blocker can stop it.",
+  "aborted":"Listening stopped.",
+  "language-not-supported":"Your browser's language isn't supported for speech. Type instead.",
+  "bad-grammar":"Speech recogniser rejected the request. Type instead."
+};
+const SR_FATAL = ["not-allowed","service-not-allowed","audio-capture","network","language-not-supported","bad-grammar"];
+
 const stages = ["s-setup","s-rec","s-anz","s-res"];
 const show = id => { stages.forEach(s => $("#"+s).classList.toggle("live", s===id)); window.scrollTo({top:0}); };
 
@@ -372,7 +385,13 @@ async function startRec(){
         transcript = (fin + interim).replace(/\s+/g," ").trim();
         $("#livetx").textContent = transcript;
       };
-      recog.onend = () => { if(running) try{ recog.start(); }catch(e){} };
+      recog.onerror = ev => {
+        const code = ev.error || "unknown";
+        const msg = SR_ERR[code] || `Speech recognition failed (${code}). Type your answer instead.`;
+        $("#hint").textContent = msg;
+        if(SR_FATAL.indexOf(code) !== -1){ srDead = true; try{ recog.onend = null; recog.stop(); }catch(e){} }
+      };
+      recog.onend = () => { if(running && !srDead) try{ recog.start(); }catch(e){ srDead = true; } };
       recog.start();
     }catch(e){}
   }
