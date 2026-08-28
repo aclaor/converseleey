@@ -130,7 +130,7 @@
 <!-- 1 · KEY -->
 <section class="stage live" id="s-key">
   <div class="head">
-    <span class="mono">Roleplay · unlimited · your key · build 5</span>
+    <span class="mono">Roleplay · unlimited · your key · build 6</span>
     <h1>Have the conversation before you have to.</h1>
     <p>An AI character plays the other person — the interviewer, the manager, the date — and stays in role. It won't coach you mid-scene, because nobody does that in real life. When you end it, it breaks character and tells you what you actually did.</p>
     <p>It runs straight from your browser to whichever provider you pick, using <b>your own key</b>. Three of the four have a genuinely free tier, so this can cost you nothing.</p>
@@ -214,6 +214,7 @@
 "use strict";
 const $ = s => document.querySelector(s);
 let scene = null, history = [], ended = false;
+let coachRun = 0, inflight = null;   // guards against a second coaching run
 let tokIn = 0, tokOut = 0;
 
 const stages = ["s-key","s-pick","s-scene","s-coach"];
@@ -531,7 +532,7 @@ async function streamOnce(system, messages, onText, maxTokens){
             stream_options:{include_usage:true}};
   }
 
-  const r = await fetch(url, {method:"POST", headers: headersFor(p, apiKey), body: JSON.stringify(body)});
+  const r = await fetch(url, {method:"POST", headers: headersFor(p, apiKey), body: JSON.stringify(body), signal: inflight ? inflight.signal : undefined});
   if(!r.ok){
     let m = `HTTP ${r.status}`;
     try{ const j = await r.json(); m = (j.error && (j.error.message||j.error)) || j.message || m; }catch(e){}
@@ -709,7 +710,7 @@ The single highest-leverage fix. One only, never a list. Quote the exact line of
 REWRITE
 Take their weakest single line and rewrite it as it should have been said. Show their version, then yours.
 
-Rules: under 250 words. No preamble, no sign-off, no markdown symbols. Do not congratulate them for practising. Never more than one thing to change.`;
+Rules: HARD LIMIT of 200 words for the whole response. Three short sections only. No preamble, no sign-off, no markdown symbols, no repetition. Do not congratulate them for practising. Never more than one thing to change. Stop when the three sections are done.`;
 }
 
 function bubble(who, text){
@@ -749,6 +750,10 @@ const showErr = e => {
 };
 
 async function openScene(s){
+  if(inflight) try{ inflight.abort(); }catch(e){}
+  inflight = new AbortController();
+  coachRun++;
+  if(listening) stopListening("");
   scene = s; history = []; ended = false;
   $("#scLabel").textContent = s.g + " · with " + s.who;
   $("#scTitle").textContent = s.t;
@@ -807,7 +812,12 @@ async function endScene(){
   const m = metrics();
   if(m.turns === 0){ $("#hint").textContent = "Say something first."; return; }
   ended = true;
+  if(listening) stopListening("");
   $("#end").classList.add("off"); $("#send").classList.add("off");
+
+  const runId = ++coachRun;                 // only the newest run may write
+  if(inflight) try{ inflight.abort(); }catch(e){}
+  inflight = new AbortController();
 
   const band = (v,ok,mid) => v<=ok?"good":v<=mid?"warn":"bad";
   const cards = [
@@ -822,7 +832,11 @@ async function endScene(){
       <span class="mono">Scene over · ${scene.t}</span>
       <h1>What you actually did</h1>
       <div class="grid">${cards.map(c=>`<div class="stat ${c.b}"><div class="k">${c.k}</div><div class="v">${c.v} <u>${c.u}</u></div></div>`).join("")}</div>
-      <div class="coach"><span class="mono">Coaching</span><div class="body" id="cbody"></div></div>
+      <div class="coach">
+        <span class="mono">Coaching</span>
+        <div class="body" id="cbody"></div>
+        <div class="acts" style="margin-top:14px"><button class="btn ghost" id="stopCoach">Stop</button></div>
+      </div>
       <div id="coachErr"></div>
       <div class="acts">
         <button class="btn" id="againSame">Run this scene again</button>
@@ -832,18 +846,29 @@ async function endScene(){
       <p class="disc">Unlimited means unlimited — run it as many times as you like. The only cost is your own API usage, shown above in tokens.</p>
     </div>`;
   show("s-coach");
-  $("#againSame").addEventListener("click", () => openScene(scene));
-  $("#pickNew").addEventListener("click", () => { renderPicker(); show("s-pick"); });
+
+  const stopBtn = $("#stopCoach");
+  stopBtn.addEventListener("click", () => {
+    if(inflight) try{ inflight.abort(); }catch(e){}
+    stopBtn.style.display = "none";
+  });
+  $("#againSame").addEventListener("click", () => { if(inflight) try{ inflight.abort(); }catch(e){} openScene(scene); });
+  $("#pickNew").addEventListener("click", () => { if(inflight) try{ inflight.abort(); }catch(e){} renderPicker(); show("s-pick"); });
 
   const convo = history.filter(x => x.content !== "[Begin the scene.]")
     .map(x => (x.role==="user" ? "THEM: " : "CHARACTER: ") + x.content).join("\n\n");
   try{
     await stream(coachPrompt(m),
-      [{role:"user", content:"Here is the full scene transcript:\n\n"+convo+"\n\nGive your feedback now."}],
-      txt => { const b = $("#cbody"); if(b) b.textContent = txt; }, 500);
+      [{role:"user", content:"Here is the full scene transcript:\n\n"+convo+"\n\nGive your feedback now, in under 200 words."}],
+      txt => { if(runId !== coachRun) return; const b = $("#cbody"); if(b) b.textContent = txt; }, 400);
   }catch(e){
-    const el = $("#coachErr"); if(el) el.innerHTML = `<div class="err"><b>Couldn't get coaching.</b><br>${String(e.message||e).slice(0,300)}</div>`;
+    if(e && e.name === "AbortError"){ /* the user stopped it on purpose */ }
+    else if(runId === coachRun){
+      const el = $("#coachErr");
+      if(el) el.innerHTML = `<div class="err"><b>Couldn't get coaching.</b><br>${String(e.message||e).slice(0,300)}</div>`;
+    }
   }
+  const sb = $("#stopCoach"); if(sb) sb.style.display = "none";
   const u = $("#useCoach"); if(u) u.textContent = `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out`;
 }
 
@@ -865,37 +890,26 @@ const SR_ERR = {
 const FATAL = ["not-allowed","service-not-allowed","audio-capture","network","language-not-supported","bad-grammar"];
 
 let recog = null, listening = false, base = "", heardAnything = false, watchdog = null;
+let startedAt = 0, fastFails = 0, noSpeechCount = 0, restartTimer = null;
 
-function stopListening(msg, keepText){
+function stopListening(msg){
   listening = false;
-  clearTimeout(watchdog);
-  if(recog){ try{ recog.onend = null; recog.stop(); }catch(e){} }
+  clearTimeout(watchdog); clearTimeout(restartTimer);
+  if(recog){ try{ recog.onend = null; recog.onerror = null; recog.stop(); }catch(e){} }
+  recog = null;
   $("#mic").classList.remove("live");
-  if(msg) $("#hint").textContent = msg;
-  else if(!keepText) $("#hint").textContent = "Check it reads right, then send.";
+  $("#hint").textContent = msg || "Check it reads right, then send.";
 }
 
-$("#mic").addEventListener("click", () => {
-  if(!SR){
-    $("#hint").textContent = "This browser has no speech-to-text. Chrome or Edge on desktop or Android do; Safari and Firefox don't. Type your line instead.";
-    return;
-  }
-  if(listening){ stopListening(); return; }
-
-  base = $("#ta").value ? $("#ta").value + " " : "";
-  heardAnything = false;
-  listening = true;
-  $("#mic").classList.add("live");
-  $("#hint").textContent = "Listening…";
-
+function beginRecognition(){
   recog = new SR();
   recog.continuous = true;
   recog.interimResults = true;
   recog.lang = navigator.language || "en-US";
   let fin = "";
+  startedAt = Date.now();
 
   recog.onstart = () => {
-    /* If nothing at all arrives, say so rather than sitting there looking live. */
     watchdog = setTimeout(() => {
       if(listening && !heardAnything)
         $("#hint").textContent = "Still not hearing you. Check the right mic is selected in your system settings — or type instead.";
@@ -903,10 +917,10 @@ $("#mic").addEventListener("click", () => {
   };
 
   recog.onresult = ev => {
-    heardAnything = true;
+    heardAnything = true; fastFails = 0; noSpeechCount = 0;
     clearTimeout(watchdog);
     let interim = "";
-    for(let i=ev.resultIndex;i<ev.results.length;i++){
+    for(let i = ev.resultIndex; i < ev.results.length; i++){
       const r = ev.results[i];
       if(r.isFinal) fin += r[0].transcript + " "; else interim += r[0].transcript;
     }
@@ -917,19 +931,54 @@ $("#mic").addEventListener("click", () => {
   recog.onerror = ev => {
     const code = ev.error || "unknown";
     const msg = SR_ERR[code] || `Speech recognition failed (${code}). Type your line instead.`;
-    if(FATAL.indexOf(code) !== -1) stopListening(msg);
-    else $("#hint").textContent = msg;          /* no-speech is recoverable, keep going */
+    if(FATAL.indexOf(code) !== -1){ stopListening(msg); return; }
+    if(code === "no-speech"){
+      /* Silence is recoverable once or twice. Past that we are in a loop:
+         every restart can re-prompt for the microphone, which is worse than
+         simply stopping and saying so. */
+      if(++noSpeechCount >= 2){
+        stopListening("Didn't pick up any speech. Check the right microphone is selected in your system settings, then try again — or type your line.");
+        return;
+      }
+    }
+    $("#hint").textContent = msg;
   };
 
   recog.onend = () => {
     if(!listening) return;
-    /* Chrome ends the session on its own every so often; restart unless we stopped it. */
-    try{ recog.start(); }
-    catch(e){ stopListening("Speech recognition stopped unexpectedly. Type your line instead."); }
+    /* A session that dies almost instantly means something is wrong. Restarting
+       in a tight loop is what caused the permission prompt to fire repeatedly. */
+    if(Date.now() - startedAt < 400){
+      if(++fastFails >= 3){
+        stopListening("Speech recognition keeps stopping straight away. That usually means the browser can't reach the speech service, or another app has the microphone. Type your line instead.");
+        return;
+      }
+    } else {
+      fastFails = 0;
+    }
+    restartTimer = setTimeout(() => {
+      if(!listening) return;
+      try{ beginRecognition(); }
+      catch(e){ stopListening("Speech recognition stopped. Type your line instead."); }
+    }, 350);                       /* a breath between attempts, never a tight loop */
   };
 
   try{ recog.start(); }
   catch(e){ stopListening("Couldn't start the microphone: " + (e.message||e) + ". Type instead."); }
+}
+
+$("#mic").addEventListener("click", () => {
+  if(!SR){
+    $("#hint").textContent = "This browser has no speech-to-text. Chrome or Edge on desktop or Android do; Safari and Firefox don't. Type your line instead.";
+    return;
+  }
+  if(listening){ stopListening(); return; }
+  base = $("#ta").value ? $("#ta").value + " " : "";
+  heardAnything = false; fastFails = 0; noSpeechCount = 0;
+  listening = true;
+  $("#mic").classList.add("live");
+  $("#hint").textContent = "Listening…";
+  beginRecognition();
 });
 
 $("#send").addEventListener("click", send);
