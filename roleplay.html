@@ -129,7 +129,7 @@
 <!-- 1 · KEY -->
 <section class="stage live" id="s-key">
   <div class="head">
-    <span class="mono">Roleplay · unlimited · your key</span>
+    <span class="mono">Roleplay · unlimited · your key · build 4</span>
     <h1>Have the conversation before you have to.</h1>
     <p>An AI character plays the other person — the interviewer, the manager, the date — and stays in role. It won't coach you mid-scene, because nobody does that in real life. When you end it, it breaks character and tells you what you actually did.</p>
     <p>It runs straight from your browser to whichever provider you pick, using <b>your own key</b>. Three of the four have a genuinely free tier, so this can cost you nothing.</p>
@@ -764,31 +764,88 @@ async function endScene(){
 }
 
 /* ======================= SPEECH ======================= */
+/* Browser speech recognition fails in eight different ways and most of them are
+   silent. Every one of them says something here, because a dead mic that looks
+   alive is worse than no mic at all. */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recog = null, listening = false, base = "";
+const SR_ERR = {
+  "no-speech":         "Didn't hear anything. Check your system input is the right microphone, then try again — or just type.",
+  "audio-capture":     "No microphone found. Something else may be using it, or the wrong input device is selected.",
+  "not-allowed":       "Microphone blocked. Click the padlock in the address bar and allow the mic for this site.",
+  "service-not-allowed":"Your browser refused the speech service. This often means a privacy setting or a Chromium build without Google speech. Typing works fine.",
+  "network":           "Speech-to-text needs the internet and the request failed. Note it runs on Google's servers, so a VPN, firewall or blocker can stop it.",
+  "aborted":           "Listening stopped.",
+  "language-not-supported": "Your browser's language isn't supported for speech. Type instead.",
+  "bad-grammar":       "Speech recogniser rejected the request. Type instead."
+};
+const FATAL = ["not-allowed","service-not-allowed","audio-capture","network","language-not-supported","bad-grammar"];
+
+let recog = null, listening = false, base = "", heardAnything = false, watchdog = null;
+
+function stopListening(msg, keepText){
+  listening = false;
+  clearTimeout(watchdog);
+  if(recog){ try{ recog.onend = null; recog.stop(); }catch(e){} }
+  $("#mic").classList.remove("live");
+  if(msg) $("#hint").textContent = msg;
+  else if(!keepText) $("#hint").textContent = "Check it reads right, then send.";
+}
+
 $("#mic").addEventListener("click", () => {
-  if(!SR){ $("#hint").textContent = "This browser can't transcribe speech — Chrome or Edge can. Type instead."; return; }
-  if(listening){
-    listening = false; try{ recog.stop(); }catch(e){}
-    $("#mic").classList.remove("live"); $("#hint").textContent = "Check it reads right, then send.";
+  if(!SR){
+    $("#hint").textContent = "This browser has no speech-to-text. Chrome or Edge on desktop or Android do; Safari and Firefox don't. Type your line instead.";
     return;
   }
+  if(listening){ stopListening(); return; }
+
   base = $("#ta").value ? $("#ta").value + " " : "";
-  listening = true; $("#mic").classList.add("live"); $("#hint").textContent = "Listening — say your line.";
+  heardAnything = false;
+  listening = true;
+  $("#mic").classList.add("live");
+  $("#hint").textContent = "Listening…";
+
   recog = new SR();
-  recog.continuous = true; recog.interimResults = true; recog.lang = navigator.language || "en-US";
+  recog.continuous = true;
+  recog.interimResults = true;
+  recog.lang = navigator.language || "en-US";
   let fin = "";
+
+  recog.onstart = () => {
+    /* If nothing at all arrives, say so rather than sitting there looking live. */
+    watchdog = setTimeout(() => {
+      if(listening && !heardAnything)
+        $("#hint").textContent = "Still not hearing you. Check the right mic is selected in your system settings — or type instead.";
+    }, 5000);
+  };
+
   recog.onresult = ev => {
+    heardAnything = true;
+    clearTimeout(watchdog);
     let interim = "";
     for(let i=ev.resultIndex;i<ev.results.length;i++){
       const r = ev.results[i];
       if(r.isFinal) fin += r[0].transcript + " "; else interim += r[0].transcript;
     }
     $("#ta").value = (base + fin + interim).replace(/\s+/g," ").trim();
+    $("#hint").textContent = "Listening — press the mic again when you're done.";
   };
-  recog.onerror = ev => { if(ev.error === "not-allowed"){ listening=false; $("#mic").classList.remove("live"); $("#hint").textContent = "Mic blocked. Type instead."; } };
-  recog.onend = () => { if(listening) try{ recog.start(); }catch(e){} };
-  try{ recog.start(); }catch(e){}
+
+  recog.onerror = ev => {
+    const code = ev.error || "unknown";
+    const msg = SR_ERR[code] || `Speech recognition failed (${code}). Type your line instead.`;
+    if(FATAL.indexOf(code) !== -1) stopListening(msg);
+    else $("#hint").textContent = msg;          /* no-speech is recoverable, keep going */
+  };
+
+  recog.onend = () => {
+    if(!listening) return;
+    /* Chrome ends the session on its own every so often; restart unless we stopped it. */
+    try{ recog.start(); }
+    catch(e){ stopListening("Speech recognition stopped unexpectedly. Type your line instead."); }
+  };
+
+  try{ recog.start(); }
+  catch(e){ stopListening("Couldn't start the microphone: " + (e.message||e) + ". Type instead."); }
 });
 
 $("#send").addEventListener("click", send);
