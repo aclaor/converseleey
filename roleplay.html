@@ -133,7 +133,7 @@
 <!-- 1 · KEY -->
 <section class="stage live" id="s-key">
   <div class="head">
-    <span class="mono">Roleplay · unlimited · your key · build 8 · voice</span>
+    <span class="mono">Roleplay · unlimited · your key · build 10</span>
     <h1>Have the conversation before you have to.</h1>
     <p>An AI character plays the other person — the interviewer, the manager, the date — and stays in role. It won't coach you mid-scene, because nobody does that in real life. When you end it, it breaks character and tells you what you actually did.</p>
     <p>It runs straight from your browser to whichever provider you pick, using <b>your own key</b>. Three of the four have a genuinely free tier, so this can cost you nothing.</p>
@@ -223,6 +223,26 @@ const $ = s => document.querySelector(s);
 let scene = null, history = [], ended = false;
 let coachRun = 0, inflight = null;   // guards against a second coaching run
 let tokIn = 0, tokOut = 0;
+
+/* Shows what this session has cost so far, in the three places that display it.
+   Wrapped in try/catch on purpose: a counter must never be able to break a reply. */
+function paintUsage(){
+  try{
+    let txt;
+    if(account && account.usage){
+      const left = Math.max(0, account.usage.cap - account.usage.messages);
+      txt = left + " of " + account.usage.cap + " messages left";
+    }else if(tokIn || tokOut){
+      txt = tokIn.toLocaleString() + " in · " + tokOut.toLocaleString() + " out";
+    }else{
+      txt = "";
+    }
+    ["usePick","useScene","useCoach"].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.textContent = txt;
+    });
+  }catch(e){}
+}
 
 const stages = ["s-key","s-pick","s-scene","s-coach"];
 const show = id => { stages.forEach(s => $("#"+s).classList.toggle("live", s===id)); window.scrollTo({top:0}); };
@@ -539,61 +559,121 @@ async function streamOnce(system, messages, onText, maxTokens){
             stream_options:{include_usage:true}};
   }
 
-  const r = await fetch(url, {method:"POST", headers: headersFor(p, apiKey), body: JSON.stringify(body), signal: inflight ? inflight.signal : undefined});
+  /* Never let a request hang forever. The spinning dots were exactly this. */
+  const guard = new AbortController();
+  const timer = setTimeout(() => { try{ guard.abort(); }catch(e){} }, 60000);
+  const signals = [guard.signal];
+  if(inflight) signals.push(inflight.signal);
+  const onOuterAbort = () => { try{ guard.abort(); }catch(e){} };
+  if(inflight) inflight.signal.addEventListener("abort", onOuterAbort);
+
+  let r;
+  try{
+    r = await fetch(url, {method:"POST", headers: headersFor(p, apiKey),
+                          body: JSON.stringify(body), signal: guard.signal});
+  }catch(e){
+    clearTimeout(timer);
+    if(inflight) inflight.signal.removeEventListener("abort", onOuterAbort);
+    if(e && e.name === "AbortError" && inflight && inflight.signal.aborted) throw e;
+    if(e && e.name === "AbortError")
+      throw new Error("The provider took more than 60 seconds and never replied. Try again, or switch provider.");
+    throw e;
+  }
+
   if(!r.ok){
+    clearTimeout(timer);
+    if(inflight) inflight.signal.removeEventListener("abort", onOuterAbort);
     let m = `HTTP ${r.status}`;
     try{ const j = await r.json(); m = (j.error && (j.error.message||j.error)) || j.message || m; }catch(e){}
     throw new Error(typeof m === "string" ? m : JSON.stringify(m));
   }
 
-  const reader = r.body.getReader(), dec = new TextDecoder();
-  let buf = "", full = "";
-  for(;;){
-    const {done, value} = await reader.read();
-    if(done) break;
-    buf += dec.decode(value, {stream:true});
-    const lines = buf.split("\n"); buf = lines.pop();
-    for(const line of lines){
-      if(!line.startsWith("data:")) continue;
-      const raw = line.slice(5).trim();
-      if(!raw || raw === "[DONE]") continue;
-      let ev; try{ ev = JSON.parse(raw); }catch(e){ continue; }
+  const ctype = (r.headers.get("content-type") || "").toLowerCase();
 
-      if(p.shape === "anthropic"){
-        if(ev.type === "content_block_delta" && ev.delta && ev.delta.text){ full += ev.delta.text; onText(full); }
-        if(ev.type === "message_start" && ev.message && ev.message.usage) tokIn += ev.message.usage.input_tokens||0;
-        if(ev.type === "message_delta" && ev.usage) tokOut += ev.usage.output_tokens||0;
-      } else if(p.shape === "gemini"){
-        const c = ev.candidates && ev.candidates[0];
-        const t = c && c.content && c.content.parts && c.content.parts.map(x=>x.text||"").join("");
-        if(t){ full += t; onText(full); }
-        if(ev.usageMetadata){
-          tokIn = Math.max(tokIn, ev.usageMetadata.promptTokenCount||0);
-          tokOut = Math.max(tokOut, ev.usageMetadata.candidatesTokenCount||0);
+  /* Some providers quietly ignore stream:true and answer with ordinary JSON.
+     Reading that as an event stream finds nothing, which looked like a hang. */
+  if(ctype.includes("application/json")){
+    clearTimeout(timer);
+    if(inflight) inflight.signal.removeEventListener("abort", onOuterAbort);
+    const j = await r.json();
+    let text = "";
+    if(p.shape === "anthropic")
+      text = (j.content || []).map(c => c.text || "").join("");
+    else if(p.shape === "gemini")
+      text = ((j.candidates||[])[0]?.content?.parts||[]).map(x => x.text || "").join("");
+    else {
+      const c = (j.choices||[])[0];
+      text = (c && (c.message?.content || c.text)) || "";
+    }
+    if(j.usage){ tokIn += j.usage.prompt_tokens||j.usage.input_tokens||0;
+                 tokOut += j.usage.completion_tokens||j.usage.output_tokens||0; }
+    if(!text) throw emptyReply(j);
+    onText(text);
+    paintUsage();
+    return text;
+  }
+
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = "", full = "", firstRaw = [];
+
+  try{
+    for(;;){
+      const {done, value} = await reader.read();
+      if(done) break;
+      buf += dec.decode(value, {stream:true});
+      const lines = buf.split("\n"); buf = lines.pop();
+      for(const line of lines){
+        if(!line.startsWith("data:")) continue;
+        const raw = line.slice(5).trim();
+        if(!raw || raw === "[DONE]") continue;
+        if(firstRaw.length < 2) firstRaw.push(raw.slice(0, 200));
+        let ev; try{ ev = JSON.parse(raw); }catch(e){ continue; }
+
+        if(p.shape === "anthropic"){
+          if(ev.type === "content_block_delta" && ev.delta){
+            const t = ev.delta.text || ev.delta.partial_json || "";
+            if(t){ full += t; onText(full); }
+          }
+          if(ev.type === "message_start" && ev.message && ev.message.usage) tokIn += ev.message.usage.input_tokens||0;
+          if(ev.type === "message_delta" && ev.usage) tokOut += ev.usage.output_tokens||0;
+        } else if(p.shape === "gemini"){
+          const c = ev.candidates && ev.candidates[0];
+          const t = c && c.content && c.content.parts && c.content.parts.map(x=>x.text||"").join("");
+          if(t){ full += t; onText(full); }
+          if(ev.usageMetadata){
+            tokIn = Math.max(tokIn, ev.usageMetadata.promptTokenCount||0);
+            tokOut = Math.max(tokOut, ev.usageMetadata.candidatesTokenCount||0);
+          }
+        } else {
+          const ch = ev.choices && ev.choices[0];
+          const d = ch && (ch.delta || ch.message);
+          /* content, or the plain-text field some gateways use */
+          let t = "";
+          if(d){ t = d.content || d.text || ""; }
+          else if(ch && typeof ch.text === "string") t = ch.text;
+          if(t){ full += t; onText(full); }
+          const u = ev.usage || (ev.x_groq && ev.x_groq.usage);
+          if(u){ tokIn += u.prompt_tokens||0; tokOut += u.completion_tokens||0; }
         }
-      } else {
-        const d = ev.choices && ev.choices[0] && ev.choices[0].delta;
-        if(d && d.content){ full += d.content; onText(full); }
-        const u = ev.usage || (ev.x_groq && ev.x_groq.usage);
-        if(u){ tokIn += u.prompt_tokens||0; tokOut += u.completion_tokens||0; }
       }
     }
+  } finally {
+    clearTimeout(timer);
+    if(inflight) inflight.signal.removeEventListener("abort", onOuterAbort);
   }
+
   paintUsage();
+  if(!full.trim()) throw emptyReply(firstRaw);
   return full;
 }
 
-function paintUsage(){
-  let t;
-  if(account){
-    const u = account.usage;
-    t = `${u.messages} / ${u.cap} messages this month`;
-  } else {
-    t = (tokIn||tokOut) ? `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out` : "";
-  }
-  const a = $("#useScene"), b = $("#usePick");
-  if(a) a.textContent = t;
-  if(b) b.textContent = t ? (account ? t : "This session: " + t) : "";
+/* An empty answer is a real failure, not a silent one. Carry a sample of what
+   the provider actually sent so the cause is visible rather than guessed at. */
+function emptyReply(sample){
+  const e = new Error("The model connected but sent back nothing.");
+  e.empty = true;
+  try{ e.sample = typeof sample === "string" ? sample : JSON.stringify(sample).slice(0, 300); }catch(x){}
+  return e;
 }
 
 /* ======================= KEY SCREEN ======================= */
@@ -701,7 +781,7 @@ async function selfTest(){
   rows.push(line(null, "Running…")); paint();
   rows.length = 0;
 
-  rows.push(line(true, "Page build", "build 8 · voice")); paint();
+  rows.push(line(true, "Page build", "build 10")); paint();
   rows.push(line(!!apiKey, "API key present", apiKey ? "stored in this browser" : "no key saved")); paint();
   rows.push(line(!!model, "Model selected", model || "none — reconnect on the first screen")); paint();
 
@@ -891,6 +971,17 @@ const showErr = e => {
     $("#scErr").innerHTML = h; if(top) top.innerHTML = h;
     return;
   }
+  if(e && e.empty){
+    const h = `<div class="err"><b>The model connected but sent back nothing.</b><br>` +
+      `That usually means the model you're on isn't really a chat model, or it refused the request.<br><br>` +
+      `<b>Try:</b> go back to the first screen, press <b>Remove my key from this browser</b>, then reconnect — ` +
+      `it will pick a different model. Or switch to another provider.<br><br>` +
+      `<span style="opacity:.75">Provider: ${PROVIDERS[provider].name} · Model: ${model || "none"}` +
+      (e.sample ? `<br>Raw reply: <code style="font-size:.85em">${String(e.sample).replace(/</g,"&lt;")}</code>` : "") +
+      `</span></div>`;
+    $("#scErr").innerHTML = h; if(top) top.innerHTML = h;
+    return;
+  }
   const detail = String(e && (e.message || e) || "unknown");
   const h = `<div class="err"><b>The AI didn't reply.</b><br>${detail.slice(0,400)}` +
     `<br><br><span style="opacity:.8">Provider: ${PROVIDERS[provider].name} · Model: ${model || "none"}</span></div>`;
@@ -921,7 +1012,7 @@ async function openScene(s){
     speakRest(first);
     history.push({role:"user", content:"[Begin the scene.]"});
     history.push({role:"assistant", content:first});
-  }catch(e){ t.remove(); showErr(e); }
+  }catch(e){ try{ t.remove(); }catch(x){} showErr(e); }
 }
 
 async function send(){
