@@ -1,306 +1,421 @@
 "use strict";
+const C = window.CURRICULUM;
+const KEY = "practiceroom.train.v1";
+const $ = s => document.querySelector(s);
 
-const TRAITS = {
-  clarity:   {name:"Clarity",    blurb:"Turning a thought into a finished sentence, on demand"},
-  presence:  {name:"Presence",   blurb:"What your voice and body do while you're speaking"},
-  initiation:{name:"Initiation", blurb:"Opening a conversation nobody handed to you"},
-  flow:      {name:"Flow",       blurb:"Keeping it alive past the first exchange"},
-  recovery:  {name:"Recovery",   blurb:"What happens after something lands badly"}
-};
+let store = {log:{}, day:1};
+try{ const r = localStorage.getItem(KEY); if(r) store = Object.assign(store, JSON.parse(r)); }catch(e){}
+const persist = () => { try{ localStorage.setItem(KEY, JSON.stringify(store)); }catch(e){} };
 
-/* score 3 = strongest, 0 = weakest */
-const Q = [
-  {t:"clarity", q:"Someone asks you a question you weren't expecting. What happens in the first three seconds?",
-   a:[["I take a breath and open with a clear first sentence",3],["I start talking and find the point somewhere in the middle",2],["I fill the gap — \"um, so, like, yeah\" — while I catch up",1],["I go blank and hear myself saying something I don't mean",0]]},
-  {t:"clarity", q:"When you finish explaining something, how often does the other person actually look like they got it?",
-   a:[["Almost always",3],["Usually",2],["About half the time",1],["I often have to start the whole thing over",0]]},
-  {t:"clarity", q:"Your sentences when you're nervous:",
-   a:[["Short, and I finish them",3],["A bit longer than usual but fine",2],["They run on and loop back on themselves",1],["They trail off and I let someone else finish them",0]]},
-  {t:"clarity", q:"You know exactly the word you want and it won't come out.",
-   a:[["Rarely — and I just use a different word",3],["Sometimes, and I move past it",2],["Most conversations",1],["Constantly, and it derails what I was saying",0]]},
+let focus = null;
+try{ const f = localStorage.getItem("practiceroom.focus"); if(f) focus = JSON.parse(f); }catch(e){}
+const TRAIT_NAMES = {clarity:"Clarity", presence:"Presence", initiation:"Initiation", flow:"Flow", recovery:"Recovery"};
 
-  {t:"presence", q:"While you are the one talking, where are your eyes?",
-   a:[["On them, comfortably, breaking away naturally",3],["On them, though I have to remind myself",2],["Mostly past them — a shoulder, the wall, my drink",1],["Down. I look up to check if they're still listening",0]]},
-  {t:"presence", q:"How often does someone ask you to repeat yourself because they didn't hear you?",
-   a:[["Basically never",3],["Once in a while, in loud rooms",2],["Often enough that I've noticed",1],["Constantly — I've started pre-emptively repeating myself",0]]},
-  {t:"presence", q:"Your speaking pace when the stakes go up:",
-   a:[["Slows down, if anything. I use pauses on purpose",3],["Stays roughly where it always is",2],["Speeds up — I'm trying to get it over with",1],["Sprints. People tell me to slow down",0]]},
-  {t:"presence", q:"What are your hands and body doing in a conversation you're anxious about?",
-   a:[["Open, still, gesturing when it helps",3],["A bit stiff but nothing anyone would notice",2],["Crossed, pocketed, or holding something like a shield",1],["Fidgeting in a way I catch myself doing and can't stop",0]]},
+/* ============================= ANALYSIS ============================= */
+const FILLERS = ["you know what i mean","you know","i mean","sort of","kind of","kinda","sorta","um","umm","uh","uhh","er","erm","ah","like","basically","literally","obviously","honestly","anyway","right","yeah","okay so"];
+const HEDGES  = ["i think","i guess","i suppose","i feel like","i would say","maybe","perhaps","probably","possibly","hopefully","might","just want","just wanted","just thinking","just wondering","just trying","just checking","just saying","a bit","a little","fairly","somewhat","pretty much","more or less","or something","if that makes sense","kind of like"];
+const STOP = new Set("the a an and or but so if then than that this these those i you he she it we they me my your his her its our their am is are was were be been being have has had do does did will would can could should of to in on at for with from as by about into over after not no yes".split(" "));
 
-  {t:"initiation", q:"You're at an event where you know one person and they've walked off. What do you do?",
-   a:[["Pick someone standing alone and open with something about the room",3],["Wait a beat, then talk to whoever's nearest",2],["Get a drink, check my phone, hope someone opens with me",1],["Find a wall, or leave early",0]]},
-  {t:"initiation", q:"A group of three is mid-conversation and you want in.",
-   a:[["Stand at the edge, listen, add something when there's a gap",3],["Wait for someone to notice me and widen the circle",2],["Hover until it feels too late, then walk away",1],["I wouldn't attempt it",0]]},
-  {t:"initiation", q:"Someone across the room you'd genuinely like to talk to. No one can introduce you.",
-   a:[["I go over. Worst case is a short conversation",3],["I look for a natural excuse — the queue, the food table",2],["I plan an opener for twenty minutes and don't use it",1],["I don't. I think about it later",0]]},
-  {t:"initiation", q:"You met someone once and it went well. Who messages first?",
-   a:[["Me, within a day or two, about something specific we talked about",3],["Me, eventually, after some drafting",2],["Them, or nobody",1],["Nobody. I assume they weren't that interested",0]]},
+function analyse(text, secs, target){
+  const clean = text.trim().replace(/\s+/g," ");
+  const lower = " " + clean.toLowerCase().replace(/[^a-z0-9'\s]/g," ").replace(/\s+/g," ") + " ";
+  const words = clean ? clean.split(/\s+/).length : 0;
+  const wpm = secs > 0 ? Math.round(words / (secs/60)) : 0;
 
-  {t:"flow", q:"They answer your question. Then what?",
-   a:[["I ask about the most interesting thing they just said",3],["I relate it to something of mine, then hand it back",2],["I move to my next prepared question",1],["I say \"oh nice\" and the conversation stops there",0]]},
-  {t:"flow", q:"A silence lands in the middle of a conversation.",
-   a:[["I let it sit. Silences are fine",3],["I let it sit a second, then pick a thread back up",2],["I panic-fill it with anything",1],["I take it as the signal to leave",0]]},
-  {t:"flow", q:"In a good conversation with someone new, who's doing the work?",
-   a:[["Roughly even, and it shifts back and forth",3],["Me, mostly, but I don't mind",2],["Them — I answer, they carry it",1],["It's an interview and I'm not sure which of us is the interviewer",0]]},
-  {t:"flow", q:"You run into someone you talked to a month ago.",
-   a:[["I remember what they were working on and ask about it",3],["I remember the vibe, not the details",2],["I remember their face and nothing else",1],["I hope they speak first so I can work out who they are",0]]},
+  const countPhr = list => {
+    let n = 0; const hits = [];
+    for(const p of list){
+      const m = lower.match(new RegExp("(?<=\\s)" + p.replace(/ /g,"\\s+") + "(?=\\s)","g"));
+      if(m){ n += m.length; hits.push([p, m.length]); }
+    }
+    return {n, hits: hits.sort((a,b)=>b[1]-a[1])};
+  };
+  const F = countPhr(FILLERS), H = countPhr(HEDGES);
+  const per100 = c => words ? +(c / words * 100).toFixed(1) : 0;
 
-  {t:"recovery", q:"You make a joke and it lands flat.",
-   a:[["I acknowledge it, laugh, and move on",3],["I move on quickly and it's forgotten in a minute",2],["I over-explain the joke, which makes it worse",1],["I go quiet for the rest of the conversation",0]]},
-  {t:"recovery", q:"Someone turns you down — a plan, a date, an ask.",
-   a:[["Fine. It's information, not a verdict",3],["Stings for an hour, then it's gone",2],["I take it as evidence about me and it colours the week",1],["I stop initiating for a while afterwards",0]]},
-  {t:"recovery", q:"After a conversation you weren't happy with, how long do you replay it?",
-   a:[["I basically don't",3],["A few minutes on the way home",2],["That night, in detail, more than once",1],["Weeks. I still have some from years ago",0]]},
-  {t:"recovery", q:"The day after a bad social experience, what do you do?",
-   a:[["Deliberately put myself in another one, sooner rather than later",3],["Carry on as normal",2],["Keep a low profile for a few days",1],["Cancel the next thing I'd agreed to",0]]}
-];
-
-const BEATS = {
-  5:{eyebrow:"A quarter in", big:"Clarity is a mechanical skill, not a personality trait.",
-     body:"The people who sound articulate under pressure aren't thinking faster than you. They've practised a first sentence that buys them three seconds. That's the whole trick, and it's trainable in a week."},
-  10:{eyebrow:"Halfway", big:"Nobody is watching you as closely as you think.",
-      body:"The pause you agonised over was, to everyone else in the room, a pause. This isn't a pep talk — it's the most common gap between how a conversation felt to you and how it actually went."},
-  15:{eyebrow:"Last stretch", big:"The hard part is rarely the opening line.",
-      body:"Most people who call themselves bad at conversation can open fine. What they can't do is take what someone just said and pull the next thread out of it. Five questions left."}
-};
-
-const DRILLS = {
-  clarity:[
-    {n:"The one-breath answer", p:"Pick a question you get asked often — what you do, how your weekend was. Answer it out loud in one breath, then stop. Ten times, cutting a word each round until it's a single clean sentence.", w:"Rambling is almost always a symptom of starting to speak before you've chosen an ending."},
-    {n:"Name the shape first", p:"Before you explain anything longer than a sentence, say the shape out loud: “Two things.” “Short version first.” “There's some background, then the point.” Then deliver it.", w:"It buys you three seconds of thinking time, and the listener hears structure instead of hesitation."},
-    {n:"Replace the filler with nothing", p:"For one day, every time you'd say um, so, or like, close your mouth instead. Record a two-minute voice memo describing your day and count them. Repeat tomorrow.", w:"You can't remove a habit you can't hear. Counting is most of the fix."}
-  ],
-  presence:[
-    {n:"Finish your sentence on their face", p:"You're allowed to look away while you think. But land the last four words of every sentence looking directly at the person. Nothing else changes.", w:"Eye contact at the end reads as conviction. Eye contact throughout is exhausting and unnecessary."},
-    {n:"Speak to the wall behind them", p:"Aim your volume at a point two metres past the person you're talking to. It'll feel too loud. It won't be.", w:"Quiet speech gets read as uncertainty about the content, not about the volume."},
-    {n:"The deliberate pause", p:"Three times a day, put a full one-second silence in the middle of a sentence — before the important word. Count it. Nobody will mention it.", w:"Slowing down is the closest thing to a cheat code for sounding composed."}
-  ],
-  initiation:[
-    {n:"Three openers a day, low stakes", p:"Baristas, lift rides, the person next to you in a queue. One line about the shared situation, then let it end. The goal isn't a conversation — it's the opening itself.", w:"You're not practising charm. You're wearing down the alarm that fires before you speak."},
-    {n:"The three-second rule", p:"When you notice the impulse to say something to someone, you have three seconds. After that the reasons not to arrive, and they always win.", w:"The hesitation isn't gathering information. It's building a case."},
-    {n:"Message first, once a day", p:"One person, once a day, first contact from you. Reference something specific they said. No “hey” with nothing after it.", w:"Initiation atrophies fastest in text, where the cost of not sending is zero."}
-  ],
-  flow:[
-    {n:"Last word, next question", p:"Take the most specific noun in what they just said and ask about that. They said “we drove back from Penang” — you ask about the drive, not about Penang.", w:"This one habit carries a conversation twenty minutes further than any list of questions."},
-    {n:"Two-sentence rule", p:"When you answer a question, give two sentences: the answer, and one detail they could grab onto. Then stop.", w:"One-word answers make the other person do all the work. Five sentences make them wait."},
-    {n:"Write down one thing", p:"After meeting someone, note one fact in your phone within ten minutes. What they're working on, where they're going, what they're annoyed about.", w:"Remembering isn't a memory skill. It's a note-taking skill, and it's the highest-return thing here."}
-  ],
-  recovery:[
-    {n:"Say the awkward thing out loud", p:"When something lands badly, name it lightly and move: “That was a terrible joke.” “That came out wrong.” Then continue the sentence you were on.", w:"Acknowledged awkwardness dissolves. Unacknowledged awkwardness sits in the room and grows."},
-    {n:"The ten-minute window", p:"You get ten minutes to replay a bad conversation. Set a timer. When it goes, you're done, and you write one line: what you'd do differently.", w:"Past ten minutes, rumination stops producing information and starts producing evidence against yourself."},
-    {n:"Re-enter fast", p:"After anything that went badly, put yourself in a low-stakes social situation within 24 hours. It doesn't need to go well. It needs to happen.", w:"Avoidance is what turns one bad conversation into six months of them."}
-  ]
-};
-
-const PLANS = {
-  clarity:"Recording yourself. Two minutes a day, out loud, on any topic — then listen back once.",
-  presence:"Volume and pace. One conversation a day where you deliberately speak slower and louder than feels right.",
-  initiation:"Reps. Three low-stakes openers a day, tracked. The number is the point, not the outcome.",
-  flow:"Follow-ups. In every conversation, ask one question that comes directly out of their last sentence.",
-  recovery:"The ten-minute timer, and re-entering within 24 hours of anything that stings."
-};
-
-/* ---------------- state ---------------- */
-const KEY = "practiceroom.check.v1";
-let answers = new Array(Q.length).fill(null);
-let idx = 0;
-
-const $ = id => document.getElementById(id);
-const save = () => { try{ localStorage.setItem(KEY, JSON.stringify({answers, idx})); }catch(e){} };
-const load = () => { try{ const r = localStorage.getItem(KEY); return r ? JSON.parse(r) : null; }catch(e){ return null; } };
-
-const screens = ["s-intro","s-q","s-beat","s-res"];
-function show(id){
-  screens.forEach(s => $(s).classList.toggle("live", s === id));
-  window.scrollTo({top:0, behavior:"instant"});
-}
-
-/* ---------------- meter ---------------- */
-const meter = $("meter");
-Q.forEach(() => { const d = document.createElement("div"); d.className = "seg"; meter.appendChild(d); });
-function paintMeter(){
-  const segs = meter.children;
-  for(let i = 0; i < segs.length; i++){
-    segs[i].className = "seg" + (answers[i] !== null ? " on" : (i === idx ? " cur" : ""));
+  const marks = (clean.match(/[.!?]/g) || []).length;
+  let sentAvg = null, longest = null;
+  if(marks >= 2){
+    const ss = clean.split(/[.!?]+/).map(s=>s.trim()).filter(s=>s.split(/\s+/).length > 1);
+    if(ss.length){
+      const lens = ss.map(s=>s.split(/\s+/).length);
+      sentAvg = Math.round(lens.reduce((a,b)=>a+b,0) / lens.length);
+      longest = Math.max.apply(null, lens);
+    }
   }
-  $("count").textContent = answers.filter(a => a !== null).length + " / " + Q.length;
-}
+  const chains = (lower.match(/\s(and|but|so|because|then|which)\s/g) || []).length;
+  const chainRate = per100(chains);
 
-/* ---------------- question flow ---------------- */
-function renderQ(){
-  const q = Q[idx];
-  $("qnum").textContent = "Question " + (idx+1) + " of " + Q.length + " · " + TRAITS[q.t].name;
-  $("qtext").textContent = q.q;
-  const box = $("opts");
-  box.innerHTML = "";
-  q.a.forEach((opt, i) => {
-    const b = document.createElement("button");
-    b.className = "opt" + (answers[idx] === i ? " picked" : "");
-    b.innerHTML = '<span class="dot"></span>';
-    const s = document.createElement("span"); s.textContent = opt[0];
-    b.appendChild(s);
-    b.addEventListener("click", () => pick(i));
-    box.appendChild(b);
-  });
-  $("back").style.visibility = idx === 0 ? "hidden" : "visible";
-  paintMeter();
-  show("s-q");
-}
+  const firstWords = lower.trim().split(" ").slice(0,4).join(" ");
+  const weakOpen = FILLERS.concat(HEDGES).some(p => firstWords.startsWith(p + " ") || firstWords === p);
 
-function pick(i){
-  answers[idx] = i; save();
-  const opts = $("opts").children;
-  for(let k = 0; k < opts.length; k++) opts[k].classList.toggle("picked", k === i);
-  paintMeter();
-  setTimeout(advance, 220);
-}
+  const freq = {};
+  lower.trim().split(" ").forEach(w => { if(w.length > 3 && !STOP.has(w)) freq[w] = (freq[w]||0)+1; });
+  const top = Object.entries(freq).sort((a,b)=>b[1]-a[1])[0] || null;
 
-function advance(){
-  const next = idx + 1;
-  if(BEATS[next] && next < Q.length){
-    const b = BEATS[next];
-    $("beat-eyebrow").textContent = b.eyebrow;
-    $("beat-big").textContent = b.big;
-    $("beat-body").textContent = b.body;
-    idx = next; save(); paintMeter(); show("s-beat"); return;
+  const overrun = target ? Math.round((secs - target) / target * 100) : 0;
+  const band = (v, ok, mid) => v <= ok ? "good" : v <= mid ? "warn" : "bad";
+  const M = [];
+
+  M.push({k:"Filler rate", v:per100(F.n), u:"per 100 words", b:band(per100(F.n), 2, 5),
+    n: F.n === 0 ? "Clean. Nothing to strip out."
+     : `${F.n} total${F.hits.length ? " — mostly “" + F.hits[0][0] + "”" : ""}. ${per100(F.n) <= 2 ? "Below the level anyone notices." : per100(F.n) <= 5 ? "Audible, and the first thing to work on." : "This is the dominant texture of the answer."}`});
+
+  M.push({k:"Pace", v:wpm, u:"words / min", b: wpm === 0 ? "flat" : wpm < 110 ? "warn" : wpm <= 155 ? "good" : wpm <= 180 ? "warn" : "bad",
+    n: wpm === 0 ? "No timing captured." : wpm < 110 ? "Slow enough that attention drifts. Some of this is thinking-out-loud time."
+      : wpm <= 155 ? "In the range that reads as composed." : wpm <= 180 ? "Fast. Fine in a burst, tiring over a minute." : "You're sprinting. The loudest signal of nerves there is."});
+
+  M.push({k:"Hedging", v:per100(H.n), u:"per 100 words", b:band(per100(H.n), 2, 4.5),
+    n: H.n === 0 ? "You stated things. Good." : `${H.n} qualifier${H.n===1?"":"s"}${H.hits.length ? " — “" + H.hits[0][0] + "” most" : ""}. ${per100(H.n) <= 2 ? "Normal." : "Each one quietly withdraws the sentence it's in."}`});
+
+  M.push({k:"Length", v:Math.round(secs), u:`sec · target ${target}`, b: !target ? "flat" : Math.abs(overrun) <= 25 ? "good" : Math.abs(overrun) <= 60 ? "warn" : "bad",
+    n: !target ? "" : overrun > 25 ? `${overrun}% over. Something in here can go.` : overrun < -25 ? `${Math.abs(overrun)}% under — you stopped before you'd finished the job.` : "Right in the window."});
+
+  if(sentAvg !== null){
+    M.push({k:"Sentence length", v:sentAvg, u:`avg · longest ${longest}`, b:band(sentAvg, 18, 26),
+      n: sentAvg <= 18 ? "Short and finishable. Easy to follow." : sentAvg <= 26 ? "Getting long. Listeners lose the start of these." : "Too long to hold. Cut them in half at the conjunctions."});
+  } else {
+    M.push({k:"Run-on chains", v:chainRate, u:"joins / 100 words", b:band(chainRate, 6, 10),
+      n: chainRate <= 6 ? "You're closing sentences rather than stringing them." : chainRate <= 10 ? "A fair bit of and-then-and-so. Try full stops." : "Almost everything is one long chain joined by and/so/but."});
   }
-  if(next >= Q.length){ idx = Q.length - 1; save(); renderResults(); return; }
-  idx = next; save(); renderQ();
+
+  M.push({k:"Words", v:words, u:"total", b:"flat",
+    n: top && top[1] >= 4 ? `“${top[0]}” appears ${top[1]} times — worth a synonym.` : "No word overused."});
+
+  const rank = {bad:0, warn:1, good:2, flat:3};
+  const worst = M.filter(m => m.b === "bad" || m.b === "warn").sort((a,b) => rank[a.b] - rank[b.b])[0];
+  let fixTitle, fixBody;
+  if(words < 12){
+    fixTitle = "Not enough here to measure.";
+    fixBody = "Give it a real attempt — thirty words minimum — and the numbers start meaning something.";
+  } else if(weakOpen){
+    fixTitle = "Your first four words were filler.";
+    fixBody = "Openings are weighted far heavier than the middle. Whatever else you change, make the first sentence land clean — decide it before you start speaking, then say it.";
+  } else if(!worst){
+    fixTitle = "Nothing to fix in the delivery.";
+    fixBody = "Every measurable is in range. The remaining work is content: compare against the model answer below and ask whether yours would actually land on the person it's aimed at.";
+  } else {
+    const fixes = {
+      "Filler rate":["Strip the fillers.","Close your mouth instead of saying the filler. Silence reads as thinking; “um” reads as stalling. This is the fastest-moving number here — do it first."],
+      "Pace":[wpm > 155 ? "Slow down." : "Pick it up.", wpm > 155 ? "Put a full one-second silence before each important word. It'll feel theatrical to you and normal to everyone else." : "Some of this gap is you composing mid-sentence. Decide the shape before you open your mouth, then deliver it at pace."],
+      "Hedging":["Cut the qualifiers.","Say it, then stop defending it. “I think maybe we should probably” and “we should” carry the same information — one of them sounds like you mean it."],
+      "Length":[overrun > 0 ? "Cut it down." : "Finish the job.", overrun > 0 ? "Find the sentence you could delete without losing anything. There's always one, and it's usually the second." : "You landed short — the target isn't arbitrary, it's roughly what the situation needs to be complete."],
+      "Sentence length":["Break the sentences.","Full stops where you currently have commas and conjunctions. Long sentences are where listeners lose the thread and where fillers breed."],
+      "Run-on chains":["Break the sentences.","You're joining clauses with and/so/but rather than ending them. Full stop, breath, next thought."]
+    };
+    const f = fixes[worst.k] || ["Work on " + worst.k.toLowerCase() + ".", worst.n];
+    fixTitle = f[0]; fixBody = f[1];
+  }
+
+  let marked = clean.replace(/</g,"&lt;");
+  const wrapPhr = (list, cls) => {
+    for(const p of list){
+      marked = marked.replace(new RegExp("\\b(" + p.replace(/ /g,"\\s+") + ")\\b","gi"), m => `<mark class="${cls}">${m}</mark>`);
+    }
+  };
+  wrapPhr(HEDGES, "h"); wrapPhr(FILLERS, "");
+  marked = marked.replace(/<mark class="">(<mark[^>]*>)/g, "$1").replace(/(<\/mark>)<\/mark>/g, "$1");
+
+  return {M, fixTitle, fixBody, marked, words, wpm, fillerRate:per100(F.n), hedgeRate:per100(H.n), secs:Math.round(secs)};
 }
 
-/* ---------------- scoring ---------------- */
-function scores(){
-  const out = {};
-  for(const k in TRAITS) out[k] = {sum:0, max:0};
-  Q.forEach((q, i) => {
-    out[q.t].max += 3;
-    if(answers[i] !== null) out[q.t].sum += q.a[answers[i]][1];
-  });
-  for(const k in out) out[k].pct = Math.round(out[k].sum / out[k].max * 100);
-  return out;
-}
-const band = p => p >= 67 ? "good" : p >= 34 ? "warn" : "bad";
-const bandLabel = {good:"Strength", warn:"Workable", bad:"Focus here"};
-const bandNote = {
-  good:"Already carrying you. Protect it — don't spend practice time here.",
-  warn:"Functional but inconsistent. Holds up until the stakes rise, then it doesn't.",
-  bad:"Where most of the friction is coming from. Start here."
+/* ============================= RECORDER ============================= */
+let recog=null, mediaRec=null, stream=null, chunks=[], t0=0, tick=null, finalTx="", running=false, audioCtx=null, rafId=null, blobUrl=null;
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let srDead = false;
+const SR_ERR = {
+  "no-speech":"Didn't hear anything. Check your system input is the right microphone, then try again \u2014 or just type.",
+  "audio-capture":"No microphone found. Something else may be using it, or the wrong input device is selected.",
+  "not-allowed":"Microphone blocked. Click the padlock in the address bar and allow the mic for this site.",
+  "service-not-allowed":"Your browser refused the speech service \u2014 often a privacy setting, or a Chromium build without Google speech. Typing still works.",
+  "network":"Speech-to-text needs the internet and the request failed. It runs on Google's servers, so a VPN, firewall or blocker can stop it.",
+  "aborted":"Listening stopped.",
+  "language-not-supported":"Your browser's language isn't supported for speech. Type instead.",
+  "bad-grammar":"Speech recogniser rejected the request. Type instead."
 };
+const SR_FATAL = ["not-allowed","service-not-allowed","audio-capture","network","language-not-supported","bad-grammar"];
 
-function renderResults(){
-  const s = scores();
-  const ranked = Object.keys(s).sort((a,b) => s[a].pct - s[b].pct);
-  const focus = ranked.slice(0,2);
-  const strength = ranked[ranked.length-1];
-  const overall = Math.round(Object.keys(s).reduce((t,k) => t + s[k].pct, 0) / 5);
+const fmt = s => Math.floor(s/60) + ":" + String(Math.floor(s%60)).padStart(2,"0");
 
-  try{ localStorage.setItem("practiceroom.focus", JSON.stringify(focus)); }catch(e){}
+/* ---- phone transcription ----
+   Live speech recognition does not work on phones: on iOS every browser is
+   WebKit underneath and the recogniser is unreliable, so the transcript box
+   stays empty and there is nothing to score. We already record the audio for
+   playback, so on a phone we send that same recording to Whisper instead. */
+const IS_IOS_T = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                 (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const IS_MOBILE_T = IS_IOS_T || /Android|Mobile/i.test(navigator.userAgent);
+const STT_KEY_T = "practiceroom.sttkey";
 
-  const headline = overall >= 70 ? "You're better at this than you think — with two specific holes."
-    : overall >= 45 ? "Solid foundations, two weak spots doing most of the damage."
-    : "Nearly everything you're avoiding traces back to two things.";
+function sttKey(){
+  try{
+    const k = localStorage.getItem(STT_KEY_T);
+    if(k) return k;
+    const rp = JSON.parse(localStorage.getItem("practiceroom.rp") || "null");
+    if(rp && rp.p === "groq" && rp.k) return rp.k;
+  }catch(e){}
+  return null;
+}
 
-  const rows = ranked.map(k => {
-    const b = band(s[k].pct);
-    return `<div class="row">
-      <div class="row-top">
-        <div class="row-name">${TRAITS[k].name} <span class="chip ${b}">${bandLabel[b]}</span></div>
-        <div class="row-val">${s[k].pct}<span style="opacity:.5">%</span></div>
+async function whisper(blob){
+  const key = sttKey();
+  if(!key){
+    $("#hint").textContent = "To get a transcript on a phone I need a free Groq key. Open the Roleplay page, paste one under Voice settings, and it will work here too. For now, type what you said.";
+    return;
+  }
+  if(!blob || blob.size < 1200){
+    $("#hint").textContent = "That recording was too short to transcribe. Try again, or type what you said.";
+    return;
+  }
+  $("#hint").textContent = "Transcribing…";
+  const fd = new FormData();
+  fd.append("file", blob, blob.type.includes("mp4") ? "line.m4a" : "line.webm");
+  fd.append("model", "whisper-large-v3-turbo");
+  fd.append("response_format", "json");
+  try{
+    const r = await fetch("https://api.groq.com/openai/v1/audio/transcriptions",
+      {method:"POST", headers:{Authorization:"Bearer " + key}, body: fd});
+    if(!r.ok){
+      $("#hint").textContent = "Transcription failed (" + r.status + "): " + (await r.text()).slice(0,140) + " — type what you said instead.";
+      return;
+    }
+    const j = await r.json();
+    const text = (j.text || "").trim();
+    if(!text){ $("#hint").textContent = "Nothing was heard in that recording. Try again, or type it."; return; }
+    $("#ta").value = text;
+    $("#hint").textContent = "Done. Check it reads right, then score it.";
+  }catch(e){
+    $("#hint").textContent = "Couldn't reach the transcription service (" + (e.message||e) + "). Type what you said instead.";
+  }
+}
+
+async function startRec(){
+  finalTx = ""; chunks = []; t0 = Date.now(); running = true; srDead = false;
+  const btn = $("#miq"); btn.classList.add("live"); btn.setAttribute("aria-label","Stop recording");
+  $("#hint").textContent = (SR && !IS_MOBILE_T) ? "Listening — speak your answer, then press stop."
+    : IS_MOBILE_T ? "Recording. Press stop when you're done and it will be written out for you."
+    : "Recording. Your browser can't transcribe, so type the gist below as you go.";
+  tick = setInterval(() => { $("#clocknum").textContent = fmt((Date.now()-t0)/1000); }, 200);
+
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    mediaRec = new MediaRecorder(stream);
+    mediaRec.ondataavailable = e => { if(e.data.size) chunks.push(e.data); };
+    mediaRec.start();
+    meterOn(stream);
+  }catch(e){ $("#hint").textContent = "No mic access — type your answer instead, then press stop."; }
+
+  if(SR && !IS_MOBILE_T){
+    try{
+      recog = new SR();
+      recog.continuous = true; recog.interimResults = true; recog.lang = navigator.language || "en-US";
+      recog.onresult = ev => {
+        let interim = "";
+        for(let i = ev.resultIndex; i < ev.results.length; i++){
+          const r = ev.results[i];
+          if(r.isFinal) finalTx += r[0].transcript + " "; else interim += r[0].transcript;
+        }
+        $("#ta").value = (finalTx + interim).replace(/\s+/g," ").trim();
+      };
+      recog.onerror = ev => {
+        const code = ev.error || "unknown";
+        $("#hint").textContent = SR_ERR[code] || `Speech recognition failed (${code}). Type your answer instead.`;
+        if(SR_FATAL.indexOf(code) !== -1){ srDead = true; try{ recog.onend = null; recog.stop(); }catch(e){} }
+      };
+      recog.onend = () => { if(running && !srDead) try{ recog.start(); }catch(e){ srDead = true; } };
+      recog.start();
+    }catch(e){}
+  }
+}
+
+function meterOn(s){
+  try{
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(s), an = audioCtx.createAnalyser();
+    an.fftSize = 64; src.connect(an);
+    const buf = new Uint8Array(an.frequencyBinCount), bars = $("#lvl").children;
+    (function loop(){
+      an.getByteFrequencyData(buf);
+      for(let i = 0; i < bars.length; i++) bars[i].style.height = Math.max(3, (buf[i*2]||0)/255*26) + "px";
+      rafId = requestAnimationFrame(loop);
+    })();
+  }catch(e){}
+}
+
+function stopRec(){
+  running = false;
+  clearInterval(tick); cancelAnimationFrame(rafId);
+  const btn = $("#miq"); btn.classList.remove("live"); btn.setAttribute("aria-label","Start recording");
+  if(recog) try{ recog.stop(); }catch(e){}
+  if(mediaRec && mediaRec.state !== "inactive"){
+    mediaRec.onstop = () => {
+      if(chunks.length){
+        if(blobUrl) URL.revokeObjectURL(blobUrl);
+        blobUrl = URL.createObjectURL(new Blob(chunks, {type: mediaRec.mimeType || "audio/webm"}));
+        $("#play").innerHTML = "";
+        const a = document.createElement("audio"); a.controls = true; a.src = blobUrl;
+        $("#play").appendChild(a);
+        if(IS_MOBILE_T && !$("#ta").value.trim()) whisper(new Blob(chunks, {type: mediaRec.mimeType || "audio/webm"}));
+      }
+    };
+    try{ mediaRec.stop(); }catch(e){}
+  }
+  if(stream) stream.getTracks().forEach(t => t.stop());
+  if(audioCtx) try{ audioCtx.close(); }catch(e){}
+  for(const b of $("#lvl").children) b.style.height = "3px";
+  const secs = (Date.now()-t0)/1000;
+  $("#hint").textContent = "Done. Check it reads right, then score it.";
+  $("#score").disabled = false;
+  $("#score").dataset.secs = secs.toFixed(1);
+}
+
+/* ============================= RENDER ============================= */
+function renderRail(){
+  const r = $("#rail"); r.innerHTML = "";
+  const names = {1:"Week 1 · Clarity", 2:"Week 2 · Presence", 3:"Week 3 · Story", 4:"Week 4 · Pressure"};
+  for(let w = 1; w <= 4; w++){
+    const g = document.createElement("div"); g.className = "rail-wk";
+    g.innerHTML = `<span class="mono">${names[w]}</span><div class="rail-days"></div>`;
+    const box = g.querySelector(".rail-days");
+    C.filter(d => d.w === w).forEach(d => {
+      const b = document.createElement("button");
+      b.className = "rd" + (store.log[d.d] ? " done" : "") + (d.d === store.day ? " now" : "");
+      b.dataset.n = d.d;
+      b.innerHTML = `<span class="pip"></span><span class="lbl">${d.d}. ${d.title}</span>`;
+      b.title = "Day " + d.d + " — " + d.title;
+      if(d.d === store.day) b.setAttribute("aria-current","true");
+      b.addEventListener("click", () => { store.day = d.d; persist(); render(); window.scrollTo({top:0}); });
+      box.appendChild(b);
+    });
+    r.appendChild(g);
+  }
+  $("#streak").textContent = Object.keys(store.log).length + " / 28 done";
+}
+
+function sparkline(){
+  const days = Object.keys(store.log).map(Number).sort((a,b)=>a-b).filter(d => store.log[d].fillerRate !== undefined);
+  if(days.length < 2) return "";
+  const vals = days.map(d => store.log[d].fillerRate);
+  const max = Math.max(6, Math.max.apply(null, vals)), W = 100, H = 40;
+  const pts = vals.map((v,i) => [ i/(days.length-1)*W, H - (v/max)*H ]);
+  const path = pts.map((p,i) => (i?"L":"M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  const last = pts[pts.length-1];
+  const trend = vals[vals.length-1] - vals[0];
+  return `<div class="card spark">
+    <h4 class="serif">Filler rate over time</h4>
+    <p class="sub">${days.length} sessions logged · ${trend < -0.3 ? "trending down, which is the whole point" : trend > 0.3 ? "trending up — check whether you're attempting harder days" : "roughly flat so far"}</p>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Filler rate across ${days.length} sessions">
+      <line x1="0" y1="${H}" x2="${W}" y2="${H}" stroke="var(--line)" stroke-width=".6" vector-effect="non-scaling-stroke"/>
+      <path d="${path} L${W} ${H} L0 ${H} Z" fill="var(--accent-soft)"/>
+      <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.4" fill="var(--accent)" vector-effect="non-scaling-stroke"/>
+    </svg>
+  </div>`;
+}
+
+function render(){
+  const d = C.find(x => x.d === store.day);
+  const prev = store.log[d.d];
+  const catLabel = d.cat === "work" ? "Workplace" : d.cat === "social" ? "Social" : "Review";
+
+  $("#main").innerHTML = `
+    <div class="day">
+      <div class="day-head">
+        <span class="mono daynum">Day ${d.d} of 28</span>
+        <span class="chip ${d.cat}">${catLabel}</span>
       </div>
-      <div class="bar2"><div class="fill ${b}" data-w="${s[k].pct}"></div></div>
-      <div class="row-note">${bandNote[b]}</div>
-    </div>`;
-  }).join("");
+      <h1 class="serif">${d.title}</h1>
 
-  const drillCards = focus.flatMap(k =>
-    DRILLS[k].map(d => `<div class="card drill">
-      <span class="for">${TRAITS[k].name}</span>
-      <h3>${d.n}</h3>
-      <p>${d.p}</p>
-      <p class="why">${d.w}</p>
-    </div>`)
-  ).join("");
+      ${focus ? `<p class="focusnote">Your assessment put <strong>${focus.map(f=>TRAIT_NAMES[f]).join("</strong> and <strong>")}</strong> as your focus areas. Watch those in particular today.</p>` : ""}
 
-  const f0 = TRAITS[focus[0]].name, f1 = TRAITS[focus[1]].name;
-  const weeks = [
-    ["Week 1", `${f0} only`, `Run the three ${f0.toLowerCase()} drills daily, alongside Days 1–7 of the programme. Don't touch anything else — splitting attention across five areas is why most of this never sticks.`],
-    ["Week 2", `${f0}, unrehearsed`, `Same drills, but in conversations you didn't plan for. Expect it to feel worse than week one. That's the point where it's actually loading.`],
-    ["Week 3", `Add ${f1}`, `Keep one ${f0.toLowerCase()} drill ticking over and put the weight on ${f1.toLowerCase()}. Two at once is the maximum.`],
-    ["Week 4", "Retake this", `Answer these twenty questions again without looking at today's results. Compare. If ${f0.toLowerCase()} hasn't moved, the drill was too comfortable.`]
-  ].map(([n,h,p]) => `<div class="week-n">${n}</div><div class="week-b"><h4>${h}</h4><p>${p}</p></div>`).join("");
-
-  const strongCopy = band(s[strength].pct) === "bad"
-    ? `<strong>Nothing here is carrying you yet (best: ${TRAITS[strength].name}, ${s[strength].pct}%).</strong> That sounds worse than it is — a flat low profile usually means avoidance rather than five separately broken skills, and it moves faster than a lopsided one. Ignore three of these and work the bottom two.`
-    : `<strong>${TRAITS[strength].name} is your strongest channel (${s[strength].pct}%).</strong> ${TRAITS[strength].blurb.charAt(0).toLowerCase() + TRAITS[strength].blurb.slice(1)} — you don't need to work on it, and you should lean on it while the other two are under construction.`;
-
-  $("s-res").innerHTML = `
-    <div class="res-head">
-      <span class="mono eyebrow">Your result · ${new Date().toLocaleDateString(undefined,{day:"numeric",month:"long",year:"numeric"})}</span>
-      <h1 class="serif">${headline}</h1>
-      <p>Overall you scored <strong>${overall}%</strong>. That number matters far less than the spread below it — a flat 60 across the board is a very different problem from a 90 and a 25.</p>
-    </div>
-
-    <div class="card scorecard">${rows}</div>
-
-    <div class="sec">
-      <h2 class="serif">What this actually says</h2>
-      <p class="sub">Read this before the drills.</p>
       <div class="card">
-        <p>${strongCopy}</p>
-        <p style="margin-top:12px; color:var(--ink-2)">Your two focus areas are <strong>${f0}</strong> (${s[focus[0]].pct}%) and <strong>${f1}</strong> (${s[focus[1]].pct}%). ${PLANS[focus[0]]}</p>
+        <p class="brief">${d.brief}</p>
+        <div class="tgt"><span class="mono">Target</span><p>${d.target}</p></div>
+        <ul class="tips">${d.tips.map(t => `<li><span>${t}</span></li>`).join("")}</ul>
       </div>
-    </div>
 
-    <div class="sec">
-      <h2 class="serif">Six drills</h2>
-      <p class="sub">Only for your two weakest areas. The rest are deliberately not here.</p>
-      ${drillCards}
-    </div>
-
-    <div class="sec">
-      <h2 class="serif">Four weeks</h2>
-      <p class="sub">In order — each week assumes the one before it happened.</p>
-      <div class="week">${weeks}</div>
-    </div>
-
-    <div class="sec next">
-      <div class="card">
-        <span class="mono" style="color:var(--accent)">Next</span>
-        <h2 class="serif" style="margin:8px 0 10px">Now go and say it out loud.</h2>
-        <p style="color:var(--ink-2)">The plan above is what to work on. The 28 days is where you actually do it — one scenario a day, spoken, measured. Day 1 takes about three minutes.</p>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:18px">
-          <a class="btn" href="train.html">Open Day 1</a>
-          <button class="btn ghost" id="print">Save as PDF</button>
-          <button class="btn ghost" id="again">Start over</button>
+      <div class="rec">
+        <div class="rec-top">
+          <button class="miq" id="miq" aria-label="Start recording">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.93V21h2v-3.07A7 7 0 0 0 19 11h-2Z"/></svg>
+          </button>
+          <div class="rec-meta">
+            <div class="clock"><span id="clocknum">0:00</span> <small>/ ${fmt(d.secs)} target</small></div>
+            <div class="rec-hint" id="hint">Press the mic and say your answer out loud. Typing works too.</div>
+          </div>
+          <div class="lvl" id="lvl" aria-hidden="true">${'<i></i>'.repeat(14)}</div>
+        </div>
+        <label class="sr" for="ta">Your answer</label>
+        <textarea class="ta" id="ta" placeholder="Your words appear here as you speak — or type them if you'd rather."></textarea>
+        <div class="rec-foot">
+          <button class="btn" id="score" disabled>Score it</button>
+          <button class="btn ghost" id="manual">Score what I typed</button>
+          <span id="play"></span>
         </div>
       </div>
-    </div>
 
-    <p class="disc">This is a structured self-reflection tool, not a clinical or psychometric assessment. If social anxiety is significantly affecting your work, relationships, or daily life, a therapist will get you further than any drill list — CBT in particular has strong evidence behind it for exactly this.</p>`;
+      <div id="out"></div>
 
-  show("s-res");
-  requestAnimationFrame(() => {
-    document.querySelectorAll("#s-res .fill").forEach(f => { f.style.width = f.dataset.w + "%"; });
+      <details class="model">
+        <summary>Show a model answer</summary>
+        <div class="mbody">
+          <p>${d.model}</p>
+          <p class="cap">Not a script to memorise — a shape. Notice where it starts, what it leaves out, and where it stops.</p>
+        </div>
+      </details>
+
+      <div class="nav">
+        <button class="btn ghost" id="prev" ${d.d === 1 ? "disabled" : ""}>← ${d.d === 1 ? "Start" : "Day " + (d.d-1)}</button>
+        <button class="btn ghost" id="next" ${d.d === 28 ? "disabled" : ""}>${d.d === 28 ? "Last day" : "Day " + (d.d+1)} →</button>
+      </div>
+
+      ${sparkline()}
+
+      <p class="disc">Everything runs in your browser. Audio is never uploaded and never saved — it exists until you leave the page. Transcripts and scores are stored on this device only.</p>
+    </div>`;
+
+  $("#miq").addEventListener("click", () => running ? stopRec() : startRec());
+  $("#score").addEventListener("click", () => doScore(+$("#score").dataset.secs || 0, d));
+  $("#manual").addEventListener("click", () => {
+    const w = $("#ta").value.trim().split(/\s+/).filter(Boolean).length;
+    doScore(w / 2.4, d);
   });
-  $("print").addEventListener("click", () => window.print());
-  $("again").addEventListener("click", () => { answers = new Array(Q.length).fill(null); idx = 0; save(); renderQ(); });
-  paintMeter();
+  $("#prev").addEventListener("click", () => { store.day--; persist(); render(); window.scrollTo({top:0}); });
+  $("#next").addEventListener("click", () => { store.day++; persist(); render(); window.scrollTo({top:0}); });
+
+  if(prev){
+    $("#ta").value = prev.transcript || "";
+    $("#hint").textContent = "You've done this day before. Beat your last filler rate of " + prev.fillerRate + ".";
+  }
+  renderRail();
 }
 
-/* ---------------- boot ---------------- */
-$("beat-next").addEventListener("click", renderQ);
-$("back").addEventListener("click", () => { if(idx > 0){ idx--; save(); renderQ(); } });
-$("begin").addEventListener("click", () => { answers = new Array(Q.length).fill(null); idx = 0; save(); renderQ(); });
-$("resume").addEventListener("click", () => { answers.every(a => a !== null) ? renderResults() : renderQ(); });
+function doScore(secs, d){
+  const text = $("#ta").value;
+  if(!text.trim()){ $("#hint").textContent = "Nothing to score yet — speak or type an answer first."; return; }
+  const a = analyse(text, secs, d.secs);
+  const cmp = store.log[d.d];
+  store.log[d.d] = {wpm:a.wpm, fillerRate:a.fillerRate, hedgeRate:a.hedgeRate, words:a.words, secs:a.secs, transcript:text.trim(), at:Date.now()};
+  persist();
 
-(function(){
-  const st = load();
-  if(st && Array.isArray(st.answers) && st.answers.length === Q.length && st.answers.some(a => a !== null)){
-    answers = st.answers;
-    idx = Math.min(st.idx || 0, Q.length - 1);
-    $("resume").style.display = "inline-flex";
-    $("begin").textContent = "Start fresh";
-  }
-  paintMeter();
-})();
+  const delta = cmp ? (a.fillerRate - cmp.fillerRate) : null;
+  $("#out").innerHTML = `
+    <div class="grid">${a.M.map(m => `
+      <div class="stat ${m.b}">
+        <div class="k">${m.k}</div>
+        <div class="v">${m.v}${m.u ? ` <u>${m.u}</u>` : ""}</div>
+        <div class="n">${m.n}</div>
+      </div>`).join("")}
+    </div>
+    <div class="card verdict">
+      <span class="mono">The one thing to change</span>
+      <h3 class="serif">${a.fixTitle}</h3>
+      <p>${a.fixBody}</p>
+      ${delta !== null ? `<p class="delta"><strong>Against your last attempt:</strong> filler rate ${delta < 0 ? "down" : delta > 0 ? "up" : "unchanged at"} ${Math.abs(delta).toFixed(1)}${delta === 0 ? "" : " per 100 words"}.</p>` : ""}
+    </div>
+    <div class="tscript"><span class="mono">Your answer · fillers in red, hedges in amber</span>${a.marked}</div>`;
+  renderRail();
+  $("#out").scrollIntoView({block:"start", behavior:"smooth"});
+}
+
+render();
