@@ -151,18 +151,36 @@ function sttKey(){
   try{
     const k = localStorage.getItem(STT_KEY_T);
     if(k) return k;
-    const rp = JSON.parse(localStorage.getItem("practiceroom.rp") || "null");
+    const rp = JSON.parse(localStorage.getItem("practiceroom.llm") || "null");
     if(rp && rp.p === "groq" && rp.k) return rp.k;
   }catch(e){}
   return null;
 }
 
+/* Asking on the page beats sending someone to a different page to find a box. */
+function askForKey(){
+  if(document.getElementById("keyask")) return;
+  const wrap = document.createElement("div");
+  wrap.id = "keyask";
+  wrap.style.cssText = "margin-top:14px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--inset)";
+  wrap.innerHTML =
+    '<p style="font-size:.93rem;margin-bottom:9px">Phones can\'t write out speech on their own, so the recording goes to Whisper to be transcribed. ' +
+    'Groq hosts it free — paste a key from <strong>console.groq.com/keys</strong> and this works everywhere on the site. It stays in this browser.</p>' +
+    '<input id="kf" type="password" placeholder="gsk_..." style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font:inherit;margin-bottom:8px">' +
+    '<button class="btn" id="kfs">Save the key</button>';
+  $("#ta").parentNode.appendChild(wrap);
+  document.getElementById("kfs").addEventListener("click", () => {
+    const v = document.getElementById("kf").value.trim();
+    if(!v) return;
+    try{ localStorage.setItem(STT_KEY_T, v); }catch(e){}
+    wrap.remove();
+    $("#hint").textContent = "Saved. Record again and it will be written out for you.";
+  });
+}
+
 async function whisper(blob){
   const key = sttKey();
-  if(!key){
-    $("#hint").textContent = "To get a transcript on a phone I need a free Groq key. Open the Roleplay page, paste one under Voice settings, and it will work here too. For now, type what you said.";
-    return;
-  }
+  if(!key){ askForKey(); return; }
   if(!blob || blob.size < 1200){
     $("#hint").textContent = "That recording was too short to transcribe. Try again, or type what you said.";
     return;
