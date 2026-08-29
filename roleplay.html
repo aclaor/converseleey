@@ -146,7 +146,7 @@
 <!-- 1 · KEY -->
 <section class="stage live" id="s-key">
   <div class="head">
-    <span class="mono">Roleplay · unlimited · your key · build 11</span>
+    <span class="mono">Roleplay · unlimited · your key · build 12</span>
     <h1>Have the conversation before you have to.</h1>
     <p>An AI character plays the other person — the interviewer, the manager, the date — and stays in role. It won't coach you mid-scene, because nobody does that in real life. When you end it, it breaks character and tells you what you actually did.</p>
     <p>It runs straight from your browser to whichever provider you pick, using <b>your own key</b>. Three of the four have a genuinely free tier, so this can cost you nothing.</p>
@@ -236,6 +236,13 @@
         </div>
         <p class="vhint">This sounds close to human, and it costs money per minute spoken — roughly five to fifteen cents. The key stays in this browser. If it ever fails mid-scene, the device voice takes over rather than leaving you in silence.</p>
         <p class="vnote" id="voicenote"></p>
+
+        <div id="sttbox" style="display:none">
+          <label for="sttkey">Groq key for the microphone (free)</label>
+          <input id="sttkey" type="password" placeholder="gsk_..." autocomplete="off">
+          <div class="vrow"><button class="btn sm" id="sttsave">Save</button></div>
+          <p class="vhint">Phones can't do live speech-to-text reliably, so the mic records your line and sends it to Whisper to be written down. Groq hosts Whisper free — a key from console.groq.com covers it. Stays in this browser.</p>
+        </div>
       </div>
     </details>
   </div>
@@ -817,7 +824,7 @@ async function selfTest(){
   rows.push(line(null, "Running…")); paint();
   rows.length = 0;
 
-  rows.push(line(true, "Page build", "build 11")); paint();
+  rows.push(line(true, "Page build", "build 12")); paint();
   rows.push(line(!!apiKey, "API key present", apiKey ? "stored in this browser" : "no key saved")); paint();
   rows.push(line(!!model, "Model selected", model || "none — reconnect on the first screen")); paint();
 
@@ -1404,7 +1411,122 @@ function beginRecognition(){
   catch(e){ stopListening("Couldn't start the microphone: " + (e.message||e) + ". Type instead."); }
 }
 
+/* ================= MOBILE MICROPHONE =================
+   Phones cannot use SpeechRecognition reliably. On iOS every browser is
+   WebKit underneath, so "use Chrome instead" does not help; on Android the
+   recogniser re-asks for the microphone almost every time it starts, which
+   is exactly the "allow mic" loop this is here to end.
+
+   So on a phone we do it the other way round: ask for the microphone once
+   with getUserMedia (that grant sticks), record the audio ourselves, and
+   send it to Whisper for transcription. One prompt, then never again. */
+
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const IS_MOBILE = IS_IOS || /Android|Mobile/i.test(navigator.userAgent);
+
+/* Whisper lives on the OpenAI request shape. Groq hosts it free and fast,
+   which is most likely what the user already has a key for. */
+const STT_KEY = "practiceroom.sttkey";
+const STT = {
+  groq:   {url:"https://api.groq.com/openai/v1/audio/transcriptions", model:"whisper-large-v3-turbo"},
+  openai: {url:"https://api.openai.com/v1/audio/transcriptions",      model:"whisper-1"}
+};
+function sttConfig(){
+  if(STT[provider] && apiKey) return {...STT[provider], key: apiKey, via: PROVIDERS[provider].name};
+  let saved = null;
+  try{ saved = localStorage.getItem(STT_KEY); }catch(e){}
+  if(saved) return {...STT.groq, key: saved, via: "Groq"};
+  return null;
+}
+
+let mediaRec = null, mediaChunks = [], mediaStream = null, recording = false;
+
+async function mobileListenStart(){
+  const cfg = sttConfig();
+  if(!cfg){
+    $("#hint").textContent = "To use the mic on a phone I need a Groq key (it's free). Open Voice settings below and paste one.";
+    const d = document.querySelector(".vset"); if(d) d.open = true;
+    const box = document.getElementById("sttbox"); if(box) box.style.display = "block";
+    return;
+  }
+  try{
+    mediaStream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true}});
+  }catch(e){
+    $("#hint").textContent = e.name === "NotAllowedError"
+      ? "The microphone is blocked for this site. On iPhone: tap the AA icon in the address bar, then Website Settings, then allow the microphone. On Android Chrome: tap the padlock, then Permissions."
+      : "Couldn't open the microphone (" + (e.name || e.message) + "). Type your line instead.";
+    return;
+  }
+
+  mediaChunks = [];
+  const type = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"]
+    .find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || "";
+  try{
+    mediaRec = new MediaRecorder(mediaStream, type ? {mimeType:type} : undefined);
+  }catch(e){
+    stopTracks();
+    $("#hint").textContent = "This browser can't record audio. Type your line instead.";
+    return;
+  }
+
+  mediaRec.ondataavailable = e => { if(e.data && e.data.size) mediaChunks.push(e.data); };
+  mediaRec.onstop = () => transcribe(new Blob(mediaChunks, {type: type || "audio/webm"}), cfg);
+
+  mediaRec.start();
+  recording = true;
+  $("#mic").classList.add("live");
+  $("#hint").textContent = "Recording. Tap the mic again when you've finished your line.";
+}
+
+function stopTracks(){
+  if(mediaStream) try{ mediaStream.getTracks().forEach(t => t.stop()); }catch(e){}
+  mediaStream = null;
+}
+
+function mobileListenStop(){
+  recording = false;
+  $("#mic").classList.remove("live");
+  $("#hint").textContent = "Transcribing…";
+  if(mediaRec && mediaRec.state !== "inactive"){ try{ mediaRec.stop(); }catch(e){} }
+  stopTracks();
+}
+
+async function transcribe(blob, cfg){
+  if(!blob || blob.size < 1200){
+    $("#hint").textContent = "That was too short to hear. Try again, or type your line.";
+    return;
+  }
+  const fd = new FormData();
+  const ext = (blob.type.includes("mp4") ? "m4a" : "webm");
+  fd.append("file", blob, "line." + ext);
+  fd.append("model", cfg.model);
+  fd.append("response_format", "json");
+  try{
+    const r = await fetch(cfg.url, {method:"POST", headers:{Authorization:"Bearer " + cfg.key}, body: fd});
+    if(!r.ok){
+      const t = (await r.text()).slice(0, 200);
+      $("#hint").textContent = "Transcription failed (" + r.status + "): " + t + " — type your line instead.";
+      return;
+    }
+    const j = await r.json();
+    const text = (j.text || "").trim();
+    if(!text){ $("#hint").textContent = "Nothing was heard in that recording. Try again, or type."; return; }
+    const ta = $("#ta");
+    ta.value = (ta.value ? ta.value + " " : "") + text;
+    $("#hint").textContent = "Check it reads right, then send.";
+  }catch(e){
+    $("#hint").textContent = "Couldn't reach the transcription service (" + (e.message||e) + "). Type your line instead.";
+  }
+}
+
 $("#mic").addEventListener("click", () => {
+  /* Phones take the recording path. Desktop keeps live recognition, which is
+     faster because the words appear as you speak. */
+  if(IS_MOBILE || !SR){
+    if(recording) mobileListenStop(); else mobileListenStart();
+    return;
+  }
   if(!SR){
     $("#hint").textContent = "This browser has no speech-to-text. Chrome or Edge on desktop or Android do; Safari and Firefox don't. Type your line instead.";
     return;
@@ -1483,6 +1605,19 @@ $("#mic").addEventListener("click", () => {
 
   const bs = document.getElementById("neuralsave");
   if(bs) bs.addEventListener("click", saveNeural);
+
+  if(IS_MOBILE){
+    const box = document.getElementById("sttbox");
+    if(box && !sttConfig()) box.style.display = "block";
+    const sk = document.getElementById("sttkey"), sb = document.getElementById("sttsave");
+    if(sb) sb.addEventListener("click", () => {
+      const v = sk.value.trim();
+      const note = document.getElementById("voicenote");
+      if(!v){ if(note){ note.style.color="var(--bad)"; note.textContent="Paste a key first."; } return; }
+      try{ localStorage.setItem(STT_KEY, v); }catch(e){}
+      if(note){ note.style.color="var(--good)"; note.textContent="Saved. The mic will work now."; }
+    });
+  }
 
   const bt = document.getElementById("neuraltest");
   if(bt) bt.addEventListener("click", () => {
