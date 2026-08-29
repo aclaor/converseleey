@@ -137,10 +137,82 @@ const SR_FATAL = ["not-allowed","service-not-allowed","audio-capture","network",
 
 const fmt = s => Math.floor(s/60) + ":" + String(Math.floor(s%60)).padStart(2,"0");
 
+/* ---- phone transcription ----
+   Live speech recognition does not work on phones: on iOS every browser is
+   WebKit underneath and the recogniser is unreliable, so the transcript box
+   stays empty and there is nothing to score. We already record the audio for
+   playback, so on a phone we send that same recording to Whisper instead. */
+const IS_IOS_T = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                 (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const IS_MOBILE_T = IS_IOS_T || /Android|Mobile/i.test(navigator.userAgent);
+const STT_KEY_T = "practiceroom.sttkey";
+
+function sttKey(){
+  try{
+    const k = localStorage.getItem(STT_KEY_T);
+    if(k) return k;
+    const rp = JSON.parse(localStorage.getItem("practiceroom.llm") || "null");
+    if(rp && rp.p === "groq" && rp.k) return rp.k;
+  }catch(e){}
+  return null;
+}
+
+/* Asking on the page beats sending someone to a different page to find a box. */
+function askForKey(){
+  if(document.getElementById("keyask")) return;
+  const wrap = document.createElement("div");
+  wrap.id = "keyask";
+  wrap.style.cssText = "margin-top:14px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--inset)";
+  wrap.innerHTML =
+    '<p style="font-size:.93rem;margin-bottom:9px">Phones can\'t write out speech on their own, so the recording goes to Whisper to be transcribed. ' +
+    'Groq hosts it free — paste a key from <strong>console.groq.com/keys</strong> and this works everywhere on the site. It stays in this browser.</p>' +
+    '<input id="kf" type="password" placeholder="gsk_..." style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font:inherit;margin-bottom:8px">' +
+    '<button class="btn" id="kfs">Save the key</button>';
+  $("#ta").parentNode.appendChild(wrap);
+  document.getElementById("kfs").addEventListener("click", () => {
+    const v = document.getElementById("kf").value.trim();
+    if(!v) return;
+    try{ localStorage.setItem(STT_KEY_T, v); }catch(e){}
+    wrap.remove();
+    $("#hint").textContent = "Saved. Record again and it will be written out for you.";
+  });
+}
+
+async function whisper(blob){
+  const key = sttKey();
+  if(!key){ askForKey(); return; }
+  if(!blob || blob.size < 1200){
+    $("#hint").textContent = "That recording was too short to transcribe. Try again, or type what you said.";
+    return;
+  }
+  $("#hint").textContent = "Transcribing…";
+  const fd = new FormData();
+  fd.append("file", blob, blob.type.includes("mp4") ? "line.m4a" : "line.webm");
+  fd.append("model", "whisper-large-v3-turbo");
+  fd.append("response_format", "json");
+  try{
+    const r = await fetch("https://api.groq.com/openai/v1/audio/transcriptions",
+      {method:"POST", headers:{Authorization:"Bearer " + key}, body: fd});
+    if(!r.ok){
+      $("#hint").textContent = "Transcription failed (" + r.status + "): " + (await r.text()).slice(0,140) + " — type what you said instead.";
+      return;
+    }
+    const j = await r.json();
+    const text = (j.text || "").trim();
+    if(!text){ $("#hint").textContent = "Nothing was heard in that recording. Try again, or type it."; return; }
+    $("#ta").value = text;
+    $("#hint").textContent = "Done. Check it reads right, then score it.";
+  }catch(e){
+    $("#hint").textContent = "Couldn't reach the transcription service (" + (e.message||e) + "). Type what you said instead.";
+  }
+}
+
 async function startRec(){
   finalTx = ""; chunks = []; t0 = Date.now(); running = true; srDead = false;
   const btn = $("#miq"); btn.classList.add("live"); btn.setAttribute("aria-label","Stop recording");
-  $("#hint").textContent = SR ? "Listening — speak your answer, then press stop." : "Recording. Your browser can't transcribe, so type the gist below as you go.";
+  $("#hint").textContent = (SR && !IS_MOBILE_T) ? "Listening — speak your answer, then press stop."
+    : IS_MOBILE_T ? "Recording. Press stop when you're done and it will be written out for you."
+    : "Recording. Your browser can't transcribe, so type the gist below as you go.";
   tick = setInterval(() => { $("#clocknum").textContent = fmt((Date.now()-t0)/1000); }, 200);
 
   try{
@@ -151,7 +223,7 @@ async function startRec(){
     meterOn(stream);
   }catch(e){ $("#hint").textContent = "No mic access — type your answer instead, then press stop."; }
 
-  if(SR){
+  if(SR && !IS_MOBILE_T){
     try{
       recog = new SR();
       recog.continuous = true; recog.interimResults = true; recog.lang = navigator.language || "en-US";
@@ -201,6 +273,7 @@ function stopRec(){
         $("#play").innerHTML = "";
         const a = document.createElement("audio"); a.controls = true; a.src = blobUrl;
         $("#play").appendChild(a);
+        if(IS_MOBILE_T && !$("#ta").value.trim()) whisper(new Blob(chunks, {type: mediaRec.mimeType || "audio/webm"}));
       }
     };
     try{ mediaRec.stop(); }catch(e){}
