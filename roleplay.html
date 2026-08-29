@@ -146,7 +146,7 @@
 <!-- 1 · KEY -->
 <section class="stage live" id="s-key">
   <div class="head">
-    <span class="mono">Roleplay · unlimited · your key · build 12</span>
+    <span class="mono">Roleplay · unlimited · your key · build 13</span>
     <h1>Have the conversation before you have to.</h1>
     <p>An AI character plays the other person — the interviewer, the manager, the date — and stays in role. It won't coach you mid-scene, because nobody does that in real life. When you end it, it breaks character and tells you what you actually did.</p>
     <p>It runs straight from your browser to whichever provider you pick, using <b>your own key</b>. Three of the four have a genuinely free tier, so this can cost you nothing.</p>
@@ -225,8 +225,9 @@
         <label for="neuralprov">Or use a real neural voice (paid, optional)</label>
         <select id="neuralprov">
           <option value="">Off — use the device voice</option>
-          <option value="elevenlabs">ElevenLabs</option>
-          <option value="openai">OpenAI</option>
+          <option value="groq">Groq — free with the key you already have</option>
+          <option value="elevenlabs">ElevenLabs — best quality, paid</option>
+          <option value="openai">OpenAI — good, paid</option>
         </select>
         <input id="neuralkey" type="password" placeholder="API key for that service" autocomplete="off">
         <input id="neuralvoice" placeholder="Voice ID (optional — a sensible default is used)" autocomplete="off">
@@ -234,7 +235,7 @@
           <button class="btn sm" id="neuralsave">Save</button>
           <button class="btn ghost sm" id="neuraltest">Test the voice</button>
         </div>
-        <p class="vhint">This sounds close to human, and it costs money per minute spoken — roughly five to fifteen cents. The key stays in this browser. If it ever fails mid-scene, the device voice takes over rather than leaving you in silence.</p>
+        <p class="vhint">Groq is free on the key you already pasted and sounds far better than the device voice. ElevenLabs is the best of the three and costs money per minute spoken — roughly five to fifteen cents. The key stays in this browser. If it ever fails mid-scene, the device voice takes over rather than leaving you in silence.</p>
         <p class="vnote" id="voicenote"></p>
 
         <div id="sttbox" style="display:none">
@@ -824,7 +825,7 @@ async function selfTest(){
   rows.push(line(null, "Running…")); paint();
   rows.length = 0;
 
-  rows.push(line(true, "Page build", "build 12")); paint();
+  rows.push(line(true, "Page build", "build 13")); paint();
   rows.push(line(!!apiKey, "API key present", apiKey ? "stored in this browser" : "no key saved")); paint();
   rows.push(line(!!model, "Model selected", model || "none — reconnect on the first screen")); paint();
 
@@ -869,6 +870,16 @@ let neural = null;                            // null = free browser voice
 
 try{ voiceOn = localStorage.getItem(VOICE_KEY) === "1"; }catch(e){}
 try{ neural = JSON.parse(localStorage.getItem(NEURAL_KEY) || "null"); }catch(e){ neural = null; }
+
+/* The browser's built-in voice is the robotic one. If a Groq key is already
+   here — and it is, because the microphone needs one — use their neural voice
+   by default instead. Same key, no extra cost, enormously better. */
+function autoNeural(){
+  if(neural && neural.key) return;
+  let k = null;
+  try{ if(provider === "groq" && apiKey) k = apiKey; else k = localStorage.getItem(STT_KEY); }catch(e){}
+  if(k) neural = {provider:"groq", key:k, voice:"Celeste-PlayAI"};
+}
 
 /* ---------- the free voice ----------
    Every device ships different voices and most of them are bad. This ranks
@@ -930,6 +941,7 @@ function paintVoicePicker(){
 function speakChunk(text){
   const t = (text || "").trim();
   if(!voiceOn || !t) return;
+  try{ autoNeural(); }catch(e){}
   if(neural && neural.key){ neuralSpeak(t); return; }
   if(!TTS) return;
   const u = new SpeechSynthesisUtterance(humanise(t));
@@ -960,6 +972,14 @@ function humanise(t){
    Optional. If anything at all goes wrong we fall back to the free voice
    rather than leaving the user in silence. */
 const NEURAL = {
+  groq: {
+    label: "Groq",
+    voice: "Celeste-PlayAI",
+    url:   () => "https://api.groq.com/openai/v1/audio/speech",
+    head:  k => ({"Authorization":"Bearer " + k, "content-type":"application/json"}),
+    body:  (t, v) => JSON.stringify({model:"playai-tts", voice: v || "Celeste-PlayAI",
+             input: t, response_format:"wav"})
+  },
   elevenlabs: {
     label: "ElevenLabs",
     voice: "21m00Tcm4TlvDq8ikWAM",           // Rachel, a sane default
@@ -1067,6 +1087,21 @@ function speakRest(full){
   if(rest.trim()){ speakChunk(rest); spokenUpTo = full.length; }
 }
 function speakReset(){ spokenUpTo = 0; }
+
+/* Waits until the character has actually finished speaking, then hands the
+   turn back. Reopening the microphone while the reply is still playing makes
+   it record itself. */
+function whenQuiet(cb){
+  let waited = 0;
+  const step = () => {
+    const busy = audioBusy || audioQueue.length ||
+                 (TTS && (TTS.speaking || TTS.pending));
+    if(!busy || waited > 90000){ setTimeout(cb, 350); return; }
+    waited += 200;
+    setTimeout(step, 200);
+  };
+  setTimeout(step, 300);
+}
 
 function paintSpeakBtn(){
   const b = $("#spk"); if(!b) return;
@@ -1225,9 +1260,10 @@ async function send(){
       txt => { fillBubble(t, txt); speakProgress(txt); }, 300);
     speakRest(reply);
     history.push({role:"assistant", content:reply});
-  }catch(e){ t.remove(); showErr(e); }
+  }catch(e){ try{ t.remove(); }catch(x){} showErr(e); }
   $("#send").classList.remove("off");
-  $("#ta").focus();
+  if(handsFree && (IS_MOBILE || !SR) && !ended) whenQuiet(() => { if(!recording && !ended) mobileListenStart(); });
+  else $("#ta").focus();
 }
 
 /* ======================= METRICS + COACHING ======================= */
@@ -1441,6 +1477,53 @@ function sttConfig(){
 }
 
 let mediaRec = null, mediaChunks = [], mediaStream = null, recording = false;
+let handsFree = true;                       /* stop talking and it just goes */
+let vadCtx = null, vadRAF = null, silenceSince = 0, heardVoice = false;
+
+/* Watches the microphone level and stops the recording once you have clearly
+   stopped talking. Without this you have to tap twice for every line, which
+   is the opposite of a conversation. */
+function startVAD(stream){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    vadCtx = new AC();
+    const src = vadCtx.createMediaStreamSource(stream);
+    const an  = vadCtx.createAnalyser();
+    an.fftSize = 1024;
+    src.connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    heardVoice = false; silenceSince = 0;
+    const started = Date.now();
+
+    const tick = () => {
+      if(!recording){ stopVAD(); return; }
+      an.getByteTimeDomainData(buf);
+      let sum = 0;
+      for(let i = 0; i < buf.length; i++){ const v = (buf[i] - 128) / 128; sum += v * v; }
+      const rms = Math.sqrt(sum / buf.length);
+
+      if(rms > 0.035){ heardVoice = true; silenceSince = 0; }
+      else if(heardVoice){
+        if(!silenceSince) silenceSince = Date.now();
+        /* A second and a half of quiet is a finished sentence, not a pause
+           for breath. Shorter than this and it cuts people off mid-thought. */
+        else if(Date.now() - silenceSince > 1500){ mobileListenStop(); return; }
+      }
+
+      /* Never listen forever. */
+      if(Date.now() - started > 60000){ mobileListenStop(); return; }
+      vadRAF = requestAnimationFrame(tick);
+    };
+    vadRAF = requestAnimationFrame(tick);
+  }catch(e){ /* no VAD is survivable — the mic button still stops it */ }
+}
+function stopVAD(){
+  if(vadRAF) cancelAnimationFrame(vadRAF);
+  vadRAF = null;
+  if(vadCtx) try{ vadCtx.close(); }catch(e){}
+  vadCtx = null;
+}
 
 async function mobileListenStart(){
   const cfg = sttConfig();
@@ -1476,7 +1559,10 @@ async function mobileListenStart(){
   mediaRec.start();
   recording = true;
   $("#mic").classList.add("live");
-  $("#hint").textContent = "Recording. Tap the mic again when you've finished your line.";
+  $("#hint").textContent = handsFree
+    ? "Listening. Just talk — it sends itself when you stop."
+    : "Recording. Tap the mic again when you've finished your line.";
+  startVAD(mediaStream);
 }
 
 function stopTracks(){
@@ -1485,7 +1571,9 @@ function stopTracks(){
 }
 
 function mobileListenStop(){
+  if(!recording) return;
   recording = false;
+  stopVAD();
   $("#mic").classList.remove("live");
   $("#hint").textContent = "Transcribing…";
   if(mediaRec && mediaRec.state !== "inactive"){ try{ mediaRec.stop(); }catch(e){} }
@@ -1514,7 +1602,12 @@ async function transcribe(blob, cfg){
     if(!text){ $("#hint").textContent = "Nothing was heard in that recording. Try again, or type."; return; }
     const ta = $("#ta");
     ta.value = (ta.value ? ta.value + " " : "") + text;
-    $("#hint").textContent = "Check it reads right, then send.";
+    if(handsFree){
+      $("#hint").textContent = "Sent.";
+      send();
+    }else{
+      $("#hint").textContent = "Check it reads right, then send.";
+    }
   }catch(e){
     $("#hint").textContent = "Couldn't reach the transcription service (" + (e.message||e) + "). Type your line instead.";
   }
